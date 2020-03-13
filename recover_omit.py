@@ -8,7 +8,7 @@ from typing import List
 
 from entity_types import Entity, Relation, Attribute, Other, Id, findby_id
 
-# TODO: クラス
+# TODO: クラス変更に応じて全面的に修正 (特にupdate部分)
 
 # NOTE: Be aware that entity IDs start with 1
 ENTITIES: List[Entity] = []
@@ -48,36 +48,37 @@ def recover_on(entities: List[Entity]) -> None:
     n = len(entities)
     # instead of list-based, use an index-based loop just in case for data corruption
     # 同格onの復元
-    for i in range(n):
-        if entities[i].rels.get("on") is not None:
-            if getattr(entities[i], "DCT-Rel", None) == "on":
-                for on_to in entities[i].rels["on"]:
-                    setattr(findby_id(entities, on_to), "DCT-Rel", "on")
-                    # NOTE: onではないDCT-Relが付与されていたらミスなので上書き
-                    # FIXME: 既に存在するattributeがあったら削除が必要
-                    ATTRIBUTES.append(
-                        Attribute(
-                            _id=Id(len(ATTRIBUTES) + 1),
-                            name="DCT-Rel",
-                            target=entities[i].id,
-                            value="on",
-                        )
-                    )
-            else:
-                on_ids = entities[i].rels["on"]
-                m = len(on_ids)
-                for j, k in zip(range(m), range(1, m)):
-                    e = findby_id(entities, on_ids[j])
-                    if e.rels.get("on") is not None:
-                        e.rels["on"].append(on_ids[k])
-                    RELATIONS.append(
-                        Relation(
-                            _id=Id(len(RELATIONS) + 1),
-                            name="on",
-                            arg1=on_ids[j],
-                            arg2=on_ids[k],
-                        )
-                    )
+    # TODO: test required
+    # for i in range(n):
+    #     if entities[i].rels.get("on") is not None:
+    #         if getattr(entities[i], "DCT-Rel", None) == "on":
+    #             for on_to in entities[i].rels["on"]:
+    #                 setattr(findby_id(entities, on_to), "DCT-Rel", "on")
+    #                 # NOTE: onではないDCT-Relが付与されていたらミスなので上書き
+    #                 # FIXME: 既に存在するattributeがあったら削除が必要
+    #                 ATTRIBUTES.append(
+    #                     Attribute(
+    #                         _id=Id(len(ATTRIBUTES) + 1),
+    #                         name="DCT-Rel",
+    #                         target=entities[i].id,
+    #                         value="on",
+    #                     )
+    #                 )
+    #         else:
+    #             on_ids = entities[i].rels["on"]
+    #             m = len(on_ids)
+    #             for j, k in zip(range(m), range(1, m)):
+    #                 e = findby_id(entities, on_ids[j])
+    #                 if e.rels.get("on") is not None:
+    #                     e.rels["on"].append(on_ids[k])
+    #                 RELATIONS.append(
+    #                     Relation(
+    #                         _id=Id(len(RELATIONS) + 1),
+    #                         name="on",
+    #                         arg1=on_ids[j],
+    #                         arg2=on_ids[k],
+    #                     )
+    #                 )
 
     # 省略onの復元
     on_scope: Id = Id(0)  # on省略の対象となるTIMEXのid
