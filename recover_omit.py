@@ -2,15 +2,17 @@
 
 original.ann -> recovered.ann
 """
+# import time
+# import sys
+
 import fire
-import time
 
 from entity_types import Id, Document
 
 
-def debug_print(*obj):
-    print(*obj)
-    time.sleep(1)
+# def debug_print(*obj):
+#     print(*obj)
+#     time.sleep(1)
 
 
 def recover_on(doc: Document) -> None:
@@ -27,7 +29,7 @@ def recover_on(doc: Document) -> None:
                 dct_rel = e.attrs["DCT-Rel"].value
             else:
                 dct_rel = None
-            has_on = "on" in e.rels
+            has_on = "on" in e.rels_to
 
             # debug_print("  has_on =", has_on, "| has_dct_on =", has_dct_on)
             if dct_rel == "on":
@@ -37,7 +39,7 @@ def recover_on(doc: Document) -> None:
             else:
                 if has_on:
                     # update on_scope
-                    on_to_ids = [on.arg2 for on in e.rels["on"]]
+                    on_to_ids = [on.arg2 for on in e.rels_to["on"]]
                     on_to_timexes = [doc.findby_id(on_to_id) for on_to_id in on_to_ids]
                     # take the first occurence
                     on_scope = sorted(on_to_timexes, key=lambda t: t.span[0])[0].id
@@ -47,7 +49,7 @@ def recover_on(doc: Document) -> None:
                     if (on_scope != 0) and (e.tag not in e.excl_time):
                         has_time = any(
                             [
-                                e.rels.get(trel)
+                                e.rels_to.get(trel)
                                 for trel in ["before", "after", "start", "finish"]
                             ]
                         ) or bool(dct_rel)
@@ -101,6 +103,7 @@ def main(
 
 
 if __name__ == "__main__":
+    # main(sys.argv[1])
     fire.Fire(main)
     # activate an interactive session to debug
     # by adding `-- --interactive` at the end of exec command
