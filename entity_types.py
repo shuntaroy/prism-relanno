@@ -9,6 +9,9 @@ A = TypeVar("A")
 class Relation:
     """Struct of a relation."""
 
+    time_rels = ["on", "before", "after", "start", "finish", "omit"]
+    basic_rels = ["change", "compare", "feature", "region", "value", "pending"]
+
     def __init__(self, _id: Id, name: str, arg1: Id, arg2: Id):
         self.id = _id
         self.name = name
@@ -37,8 +40,8 @@ class Relation:
 
     def __eq__(self, other):
         _name = self.name == other.name
-        _arg1 = self.arg1 == self.arg1
-        _arg2 = self.arg2 == self.arg2
+        _arg1 = self.arg1 == other.arg1
+        _arg2 = self.arg2 == other.arg2
         return all([_name, _arg1, _arg2])
 
 
@@ -106,7 +109,8 @@ class Entity:
         self.text = text
 
         self.attrs: Dict[str, Attribute] = {}
-        self.rels: Dict[str, Set[Relation]] = {}
+        self.rels_to: Dict[str, Set[Relation]] = {}  # self.id == relation.arg1
+        self.rels_from: Dict[str, Set[Relation]] = {}  # self.id == relation.arg2
         self.others: List[Other] = []
 
     @classmethod
@@ -124,10 +128,16 @@ class Entity:
         return f"T{self.id}\t{self.tag} {self.span[0]} {self.span[1]}\t{self.text}"
 
     def set_attribute(self, attribute: Attribute) -> None:
+        # NOTE: For reflective operation to relations and attributes, the objects Relation and Attribute are directly stored.
         self.attrs[attribute.name] = attribute
 
-    def set_relation(self, relation: Relation) -> None:
-        self.rels.setdefault(relation.name, set()).add(relation)
+    def set_relation_to(self, relation: Relation) -> None:
+        """self.id == relation.arg1"""
+        self.rels_to.setdefault(relation.name, set()).add(relation)
+
+    def set_relation_from(self, relation: Relation) -> None:
+        """self.id == relation.arg2"""
+        self.rels_from.setdefault(relation.name, set()).add(relation)
 
     def set_other(self, other: Other) -> None:
         self.others.append(other)
@@ -153,11 +163,11 @@ class Document:
 
         with open(filename, "r") as fi:
             for line in fi:
-                self.read_ann_line(line.strip())
+                self._read_ann_line(line.strip())
 
-        self.build_doc()
+        self._build_doc()
 
-    def read_ann_line(self, line: str) -> None:
+    def _read_ann_line(self, line: str) -> None:
         assert self.built is False
 
         if line.startswith("T"):
@@ -169,7 +179,7 @@ class Document:
         else:
             self.others.append(Other.from_raw(line))
 
-    def build_doc(self):
+    def _build_doc(self):
         """Update entities with attributes and relations."""
         assert self.built is False
 
@@ -182,16 +192,16 @@ class Document:
 
         for rel in self.relations:
             self.rel_id_max = max(self.rel_id_max, rel.id)
-            e = self.findby_id(rel.arg1)
-            e.set_relation(rel)
+            e1 = self.findby_id(rel.arg1)
+            e1.set_relation_to(rel)
+            e2 = self.findby_id(rel.arg2)
+            e2.set_relation_from(rel)
 
         for other in self.others:
             self.other_id_max = max(self.other_id_max, other.id)
             e = self.findby_id(rel.arg1)
             e.set_other(other)
 
-        self.attributes = []
-        self.relations = []
         self.built = True
 
     def findby_id(self, _id: Id) -> Entity:
@@ -221,15 +231,18 @@ class Document:
 
         self.rel_id_max += 1
         new_rel = Relation(_id=Id(self.rel_id_max), name=reltype, arg1=arg1, arg2=arg2)
-        self.findby_id(arg1).set_relation(new_rel)
+        self.findby_id(arg1).set_relation_to(new_rel)
 
     def output_ann(self, fout=sys.stdout):
         assert self.built is True
 
+        self.attributes = []
+        self.relations = []
+
         for e in self.entities:
             for attrtype, attr in e.attrs.items():
                 self.attributes.append(attr)
-            for reltype, rels in e.rels.items():
+            for reltype, rels in e.rels_to.items():
                 self.relations.extend(rels)
 
         self.attributes = sorted(self.attributes, key=lambda a: a.id)
