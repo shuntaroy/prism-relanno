@@ -1,4 +1,30 @@
-# Omit tag recovery
+# PRISM-RelAnno
+
+Visualise relation annotations for human.
+
+## Usage
+
+- `recover_omit.py` で省略された関係を復元した `-r.ann`ファイルを作る
+- `visualise_rel.py` で基本関係のdot scriptがstdoutされるので，graphvizできる
+- `visualise_time.py` は時間関係
+
+### use as a library
+
+`entity_types.py` に便利なクラスがいろいろあるので，bratからpython-readableなobjectを作って好きな用途に使用できる．
+
+APIとしては…
+
+
+## TODOs
+
+- [ ] `visualise_*`は統一して良さそう
+- [ ] docs (using pyment to autogen, then include doctest...?)
+
+
+-----------------------------------
+# Appendix
+
+Related notes for reference.
 
 ## Omit rules
 
@@ -14,12 +40,12 @@ T/M-key --- value
 
 1:1　で連続している時は省略可能
 
-### 同格
+<!-- ### 同格関係の複数タグから付与する region 関係
 
 > 同格関係にある複数のDからのregion関係はどれか1つから伸ばせば良く，他は省略可
 
-同格のD?
-
+`A1-region->D1, A1-region->D2 s.t. D1==D2`
+then `D1/D2-region->A2` (etc.) can be omitted. -->
 
 ## Brat 'ann' file specs
 
@@ -30,7 +56,7 @@ TSV of `ID\tSpan\tRef`
 `Span` = (type, start-offset, end-offset)
 
 Space-separated.
-end-offset is an exclusive index.
+End-offset is an exclusive index.
 
 ### Annotation ID
 

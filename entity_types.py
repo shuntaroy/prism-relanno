@@ -1,3 +1,4 @@
+"""Classes for brat annotation entities and a whole document."""
 from __future__ import annotations
 import sys
 from typing import List, Dict, Tuple, NewType, TypeVar, Set
@@ -102,16 +103,26 @@ class Entity:
 
     excl_time = ["Anatomical", "Feature", "Pending"]
 
-    def __init__(self, _id: Id, tag: str, span: Tuple[int, int], text: str):
+    def __init__(
+        self, _id: Id, tag: str, span: Tuple[int, int], text: str, doc: Document = None
+    ):
         self.id = _id
         self.tag = tag
         self.span = span
         self.text = text
 
-        self.attrs: Dict[str, Attribute] = {}
-        self.rels_to: Dict[str, Set[Relation]] = {}  # self.id == relation.arg1
-        self.rels_from: Dict[str, Set[Relation]] = {}  # self.id == relation.arg2
+        # self._attrs: Dict[str, Attribute] = {}
+        # self._rels_to: Dict[str, Set[Relation]] = {}
+        # self._rels_from: Dict[str, Set[Relation]] = {}
+
+        # # dictやset にすることで uniqueness を保つ
+        self.attrs: Dict[str, str] = {}
+        self.rels_to: Dict[str, Set[Entity]] = {}
+        self.rels_from: Dict[str, Set[Entity]] = {}
+
         self.others: List[Other] = []
+
+        self.parent_doc = doc
 
     @classmethod
     def from_raw(cls, raw_line: str) -> Entity:
@@ -127,20 +138,28 @@ class Entity:
     def __str__(self):
         return f"T{self.id}\t{self.tag} {self.span[0]} {self.span[1]}\t{self.text}"
 
-    def set_attribute(self, attribute: Attribute) -> None:
-        # NOTE: For reflective operation to relations and attributes, the objects Relation and Attribute are directly stored.
-        self.attrs[attribute.name] = attribute
+    def set_attribute(self, attrname: str, attrval: str) -> None:
+        # NOTE: For reactive operation to relations and attributes, the objects Relation and Attribute are directly stored.
+        self.attrs[attrname] = attrval
+        self.parent_doc.update_needed = True
 
-    def set_relation_to(self, relation: Relation) -> None:
-        """self.id == relation.arg1"""
-        self.rels_to.setdefault(relation.name, set()).add(relation)
+    # def set_relation_to(self, relation: Relation) -> None:
+    #     """self.id == relation.arg1"""
+    #     self.rels_to.setdefault(relation.name, set()).add(relation)
+    def set_relation_to(self, reltype: str, entity: Entity) -> None:
+        self.rels_to.setdefault(reltype, set()).add(entity)
+        self.parent_doc.update_needed = True
 
-    def set_relation_from(self, relation: Relation) -> None:
-        """self.id == relation.arg2"""
-        self.rels_from.setdefault(relation.name, set()).add(relation)
+    # def set_relation_from(self, relation: Relation) -> None:
+    #     """self.id == relation.arg2"""
+    #     self.rels_from.setdefault(relation.name, set()).add(relation)
+    def set_relation_from(self, reltype: str, entity: Entity) -> None:
+        self.rels_from.setdefault(reltype, set()).add(entity)
+        self.parent_doc.update_needed = True
 
     def set_other(self, other: Other) -> None:
         self.others.append(other)
+        self.parent_doc.update_needed = True
 
 
 class Document:
@@ -159,7 +178,9 @@ class Document:
         self.other_id_max = 0
 
         # states
-        self.built = False
+        self.isbuilt = False  # True == initialised
+        self.update_needed = False
+        # if True, there is relation/attribute updates, implying the need for update to self.relations/attributes
 
         with open(filename, "r") as fi:
             for line in fi:
@@ -168,7 +189,7 @@ class Document:
         self._build_doc()
 
     def _read_ann_line(self, line: str) -> None:
-        assert self.built is False
+        assert self.isbuilt is False
 
         if line.startswith("T"):
             self.entities.append(Entity.from_raw(line))
@@ -181,80 +202,127 @@ class Document:
 
     def _build_doc(self):
         """Update entities with attributes and relations."""
-        assert self.built is False
+        assert self.isbuilt is False
 
-        self.ent_id_max = max(*[e.id for e in self.entities])
+        for ent in self.entities:
+            self.ent_id_max = max(self.ent_id_max, ent.id)
+            ent.parent_doc = self
 
         for attr in self.attributes:
             self.attr_id_max = max(self.attr_id_max, attr.id)
-            e: Entity = self.findby_id(attr.target)
-            e.set_attribute(attr)
+            e = self.findby_id(attr.target)
+            e.set_attribute(attr.name, attr.value)
 
         for rel in self.relations:
             self.rel_id_max = max(self.rel_id_max, rel.id)
             e1 = self.findby_id(rel.arg1)
-            e1.set_relation_to(rel)
             e2 = self.findby_id(rel.arg2)
-            e2.set_relation_from(rel)
+            e1.set_relation_to(rel.name, e2)
+            e2.set_relation_from(rel.name, e1)
 
         for other in self.others:
             self.other_id_max = max(self.other_id_max, other.id)
             e = self.findby_id(rel.arg1)
             e.set_other(other)
 
-        self.built = True
+        self.isbuilt = True
+        self.update_needed = False
 
     def findby_id(self, _id: Id) -> Entity:
         """Find an entity specified by the ID"""
         es = [e for e in self.entities if e.id == _id]
-        assert len(es) == 1, "Containing IDs are not unique"
+        assert len(es) == 1, "Non-unique IDs are stored in the doc!"
         return es[0]
 
+    def _validate(self) -> None:
+        assert self.isbuilt is True, "Not initialised yet"
+        # assert self.update_needed is False, "update_doc() required"
+
     def sortedby_occurrence(self, tgt_anno: str = "entities") -> None:
-        assert self.built is True
+        self._validate()
 
         setattr(
             self, tgt_anno, sorted(getattr(self, tgt_anno), key=lambda e: e.span[0])
         )
 
     def update_attribute(self, attrtype: str, target: Id, value: str) -> None:
-        assert self.built is True
+        self._validate()
 
-        self.attr_id_max += 1
-        new_attr = Attribute(
-            _id=Id(self.attr_id_max), name=attrtype, target=target, value=value
-        )
-        self.findby_id(target).set_attribute(new_attr)
+        e = self.findby_id(target)
+        if attrtype in e.attrs and not self.update_needed:
+            # find an existing Attribute
+            attr = [
+                a for a in self.attributes if a.name == attrtype and a.target == target
+            ][0]
+            attr.value = value
+        else:
+            self.attr_id_max += 1
+            new_attr = Attribute(
+                _id=Id(self.attr_id_max), name=attrtype, target=target, value=value
+            )
+            e.set_attribute(attrtype, value)
+            self.attributes.append(new_attr)
 
     def add_relation(self, reltype: str, arg1: Id, arg2: Id) -> None:
-        assert self.built is True
+        self._validate()
 
-        self.rel_id_max += 1
-        new_rel = Relation(_id=Id(self.rel_id_max), name=reltype, arg1=arg1, arg2=arg2)
-        self.findby_id(arg1).set_relation_to(new_rel)
+        e1 = self.findby_id(arg1)
+        e2 = self.findby_id(arg2)
+        if e2 not in e1.rels_to.get(reltype, []):
+            # No 'update' for rel. Just 'add' a new one
+            self.rel_id_max += 1
+            new_rel = Relation(
+                _id=Id(self.rel_id_max), name=reltype, arg1=arg1, arg2=arg2
+            )
+            e1.set_relation_to(reltype, e2)
+            e2.set_relation_from(reltype, e1)
+            self.relations.append(new_rel)
+        elif self.update_needed:
+            # No 'update' for rel. Just 'add' a new one
+            self.rel_id_max += 1
+            new_rel = Relation(
+                _id=Id(self.rel_id_max), name=reltype, arg1=arg1, arg2=arg2
+            )
+            self.relations.append(new_rel)
+
+    def _update_doc(self) -> None:
+        # TODO: implement a more efficient update procedure
+        # reset all lists accodring to the current state of each Entity
+        self.attributes = []
+        self.attr_id_max = 0
+        self.relations = []
+        self.rel_id_max = 0
+        for e in self.entities:
+            for attrtype, attrval in e.attrs.items():
+                self.update_attribute(attrtype, e.id, attrval)
+            for reltype, rels in e.rels_to.items():
+                for rel in rels:
+                    self.add_relation(reltype, e.id, rel.id)
+
+        self.attr_id_max = max(*[a.id for a in self.attributes])
+        self.rel_id_max = max(*[r.id for r in self.relations])
+        self.update_needed = False
+
+    def update_doc(self) -> None:
+        assert self.isbuilt is True
+        if self.update_needed:
+            self._update_doc()
 
     def output_ann(self, fout=sys.stdout):
-        assert self.built is True
+        self.update_doc()
 
-        self.attributes = []
-        self.relations = []
+        # sort lists by IDs　just in case
+        self.entities = sorted(self.entities, key=lambda e: e.id)
+        # self.attributes = sorted(self.attributes, key=lambda a: a.id)
+        # self.relations = sorted(self.relations, key=lambda r: r.id)
 
-        for e in self.entities:
-            for attrtype, attr in e.attrs.items():
-                self.attributes.append(attr)
-            for reltype, rels in e.rels_to.items():
-                self.relations.extend(rels)
-
-        self.attributes = sorted(self.attributes, key=lambda a: a.id)
-        self.relations = sorted(self.relations, key=lambda r: r.id)
-
+        # print
         annotations: List[list] = [
             self.entities,
             self.relations,
             self.attributes,
             self.others,
         ]
-
         for anno in annotations:
             for a in anno:
                 if a is not None:

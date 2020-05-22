@@ -26,7 +26,7 @@ def recover_on(doc: Document) -> None:
             # debug_print("looking at:", e)
             # debug_print("  on_scope =", on_scope)
             if "DCT-Rel" in e.attrs:
-                dct_rel = e.attrs["DCT-Rel"].value
+                dct_rel = e.attrs["DCT-Rel"]
             else:
                 dct_rel = None
             has_on = "on" in e.rels_to
@@ -39,7 +39,7 @@ def recover_on(doc: Document) -> None:
             else:
                 if has_on:
                     # update on_scope
-                    on_to_ids = [on.arg2 for on in e.rels_to["on"]]
+                    on_to_ids = [on.id for on in e.rels_to["on"]]
                     on_to_timexes = [doc.findby_id(on_to_id) for on_to_id in on_to_ids]
                     # take the first occurence
                     on_scope = sorted(on_to_timexes, key=lambda t: t.span[0])[0].id
@@ -62,6 +62,7 @@ def recover_on(doc: Document) -> None:
                             else:
                                 doc.add_relation("on", e.id, on_scope)
                                 # debug_print("  add on-rel ->", doc.findby_id(on_scope))
+    # doc.update_doc()
 
 
 def recover_value(doc: Document) -> None:
@@ -75,10 +76,7 @@ def recover_value(doc: Document) -> None:
         j_is_val = doc.entities[j].tag == doc.entities[i].tag.replace("Key", "Val")
         if i_is_key and j_is_val:
             doc.add_relation("value", doc.entities[i].id, doc.entities[j].id)
-
-
-def recover_d(doc: Document) -> None:
-    pass
+    # doc.update_doc()
 
 
 def main(
