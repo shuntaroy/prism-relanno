@@ -7,6 +7,7 @@ verify_ssl = true
 
 [packages]
 fire = "*"
+pyment = "*"
 
 [requires]
 python_version = "3.7"

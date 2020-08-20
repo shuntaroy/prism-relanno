@@ -142,3 +142,6 @@ cython_debug/
 
 
 Pipfile.lock
+timex_modules/
+*.png
+*.pdf

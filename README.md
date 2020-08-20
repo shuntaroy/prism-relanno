@@ -19,6 +19,7 @@ APIとしては…
 
 - [ ] `visualise_*`は統一して良さそう
 - [ ] docs (using pyment to autogen, then include doctest...?)
+- [ ] Search API adapted from [Cypher](https://neo4j.com/developer/cypher-query-language/)
 
 
 -----------------------------------
