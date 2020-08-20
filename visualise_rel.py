@@ -22,34 +22,15 @@ CLR = {
     "TIMEX3": "violet",
 }
 
-
-def resolve_rel(doc: Document) -> None:
-    assert doc.built
-
-    # create the DCT entity
-    dct = Entity(Id(-1), "TIMEX3", (-1, 0), "DCT")
-    doc.entities.append(dct)
-
-    # inverse relations for parent entities
-    n = len(doc.entities)
-    for i in range(n):
-        for reltype, rels in doc.entities[i].rels_to.items():
-            for rel in rels:
-                e: Entity = doc.findby_id(rel.arg2)
-                e.set_relation_from(reltype, doc.entities[i])
-        dct_rel = doc.entities[i].attrs.get("DCT-Rel")
-        if dct_rel:
-            dct.set_relation_from(dct_rel.name, doc.entities[i])
-
-    # TODO: also convert to JSON for runtime-agnostic compatibility
+DOTHEAD = """digraph G {
+newrank=true;
+rankdir="LR"; ranksep=.75;
+node [shape=box,style=filled,fontname=Helvetica]
+"""
 
 
 def generate_dot(doc: Document) -> None:
-    output = """digraph G {
-    newrank=true;
-    rankdir="LR"; ranksep=.75;
-    node [shape=box,style=filled,fontname=Helvetica]
-    """
+    output = DOTHEAD
     groups: Dict[str, List[Entity]] = {}
     for ent in doc.entities:
         if ent.tag == "TIMEX3" and ent.rels_from.keys():
@@ -98,7 +79,7 @@ def _make_dot_label(ent: Entity) -> str:
     attr = ""
     if ent.attrs:
         if "certainty" in ent.attrs:
-            cert = ent.attrs["certainty"].value
+            cert = ent.attrs["certainty"]
             if cert == "positive":
                 attr = "(+)"
             elif cert == "negative":
@@ -106,7 +87,7 @@ def _make_dot_label(ent: Entity) -> str:
             else:
                 attr = "(?)"
         elif "state" in ent.attrs:
-            state = ent.attrs["state"].value
+            state = ent.attrs["state"]
             if state == "executed":
                 attr = "(+)"
             elif state == "negated":
