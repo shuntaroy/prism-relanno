@@ -133,9 +133,36 @@ class Entity:
         )
 
     def __repr__(self):
-        return f"<T{self.id} {self.tag} {self.text}>"
+        """Print concise information for debug."""
+        if "certainty" in self.attrs:
+            c = self.attrs["certainty"]
+            if c == "positive":
+                cert = "+"
+            elif c == "negative":
+                cert = "-"
+            elif c == "suspicious":
+                cert = "?"
+            elif c == "general":
+                cert = "*"
+            return f"<T{self.id} {self.tag}({cert}) {self.text}>"
+        elif "state" in self.attrs:
+            s = self.attrs["state"]
+            if s == "executed":
+                state = "+"
+            elif s == "negated":
+                state = "-"
+            elif s == "scheduled":
+                state = "?"
+            elif s == "other":
+                state = "*"
+            return f"<T{self.id} {self.tag}({state}) {self.text}>"
+        elif "type" in self.attrs:
+            return f"<T{self.id} {self.tag}({self.attrs['type'][:3]}) {self.text}>"
+        else:
+            return f"<T{self.id} {self.tag} {self.text}>"
 
     def __str__(self):
+        """Convert to Brat annotation format."""
         return f"T{self.id}\t{self.tag} {self.span[0]} {self.span[1]}\t{self.text}"
 
     def set_attribute(self, attrname: str, attrval: str) -> None:
