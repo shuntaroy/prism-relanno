@@ -4,6 +4,7 @@ original.ann -> recovered.ann
 """
 # import time
 # import sys
+import shutil
 
 import fire
 
@@ -80,7 +81,11 @@ def recover_value(doc: Document) -> None:
 
 
 def main(
-    filename: str, on: bool = True, value: bool = True, write: bool = True
+    filename: str,
+    on: bool = True,
+    value: bool = True,
+    write: bool = True,
+    gen_txt: bool = True,
 ) -> None:
     doc = Document(filename)
     doc.sortedby_occurrence()
@@ -96,6 +101,10 @@ def main(
             doc.output_ann(fout=fout)
     else:
         doc.output_ann()
+
+    if gen_txt:
+        fptxt = filename.replace(".ann", ".txt")
+        shutil.copyfile(fptxt, fptxt.replace(".txt", "-r.txt"))
 
     # return doc
 
