@@ -6,6 +6,10 @@ from typing import List, Dict, Tuple, NewType, TypeVar, Set
 Id = NewType("Id", int)
 A = TypeVar("A")
 
+# TODO: one source of truth
+# TODO: xml string parsing
+# TODO: xml output with original texts
+
 
 class Relation:
     """Struct of a relation."""
@@ -124,6 +128,15 @@ class Entity:
 
         self.parent_doc = doc
 
+    def __hash__(self):
+        return hash((self.tag, *self.span, self.text))
+
+    def __eq__(self, other):
+        _tag = self.tag == other.tag
+        _span = self.span == other.span
+        _text = self.text == other.text
+        return all([_tag, _span, _text])
+
     @classmethod
     def from_raw(cls, raw_line: str) -> Entity:
         _id, raw_span, text = raw_line.split("\t")
@@ -157,7 +170,10 @@ class Entity:
                 state = "*"
             return f"<T{self.id} {self.tag}({state}) {self.text}>"
         elif "type" in self.attrs:
-            return f"<T{self.id} {self.tag}({self.attrs['type'][:3]}) {self.text}>"
+            if "value" in self.attrs:
+                return f"<T{self.id} {self.tag}({self.attrs['type'][:3]}) {self.text} ({self.attrs['value']})>"
+            else:
+                return f"<T{self.id} {self.tag}({self.attrs['type'][:3]}) {self.text}>"
         else:
             return f"<T{self.id} {self.tag} {self.text}>"
 
