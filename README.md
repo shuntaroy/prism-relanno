@@ -21,6 +21,11 @@ $ python recover_omit.py XXX.ann  # this creates XXX-r.ann (and XXX-r.txt)
 $ python visualise_time.py XXX-r.ann 2014-03-20 > XXX.json
 ```
 
+#### WIP/TODO features
+
+- [ ] Infer anatomical structures from knowledge base
+- [ ] Input from XML formatted files
+
 ### use as a library
 
 `entity_types.py` に便利なクラスがいろいろあるので，bratからpython-readableなobjectを作って好きな用途に使用できる．
