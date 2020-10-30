@@ -2,11 +2,24 @@
 
 Visualise relation annotations for human.
 
+## Requirements
+
+- Python 3.6--3.8 (not compatible with 3.9 due to old type hints)
+
 ## Usage
 
 - `recover_omit.py` で省略された関係を復元した `-r.ann`ファイルを作る
 - `visualise_rel.py` で基本関係のdot scriptがstdoutされるので，graphvizできる
-- `visualise_time.py` は時間関係
+- `visualise_time.py` は時間関係を処理する．同じ時点に属するEntityをTimeContainerにまとめる，など．
+
+### Timeline information for HeaRT input
+
+Given a Brat's `.ann` file annotated with PRISM guidelines, the DCT of which is 2014-03-20, run:
+
+```
+$ python recover_omit.py XXX.ann  # this creates XXX-r.ann (and XXX-r.txt)
+$ python visualise_time.py XXX-r.ann 2014-03-20 > XXX.json
+```
 
 ### use as a library
 
@@ -15,12 +28,13 @@ Visualise relation annotations for human.
 APIとしては…
 
 
-## TODOs
+## TODOs for Refactor/Improvement
 
 - [ ] `visualise_*`は統一して良さそう
 - [ ] docs (using pyment to autogen, then include doctest...?)
 - [ ] Search API adapted from [Cypher](https://neo4j.com/developer/cypher-query-language/)
 
+## Notes
 
 -----------------------------------
 # Appendix

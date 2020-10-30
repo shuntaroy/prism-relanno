@@ -467,10 +467,10 @@ def normalise_all_timex(doc: Document, dct: str) -> None:
             # the return of `normalize` follows TimeL's 'value' spec
 
 
-def to_json(tcs: List[TimeContainer], doc: Document) -> str:
+def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = False) -> str:
     times = []
     entities = []
-    anatomy = []  # TODO: anatomy包含関係 knowledge-based
+    anatomy = []
     anatomy_ids = []
 
     # time and entities
@@ -481,15 +481,21 @@ def to_json(tcs: List[TimeContainer], doc: Document) -> str:
                     "id": tc.head.id,
                     "text": tc.head.text,
                     "value": tc.head.attrs["value"],
+                    "type": tc.head.attrs["type"],
                 }
             )
             for b in tc.b_ents:
-                ent = embed_entity(b, tcs)
+                if b.tag in ["Change", "Feature"]:
+                    continue
+                elif "value" in b.rels_from:
+                    continue
+                ent = embed_entity(b, tcs, in_a_tc=tc)
                 if "anatomy" in ent:
                     anatomy_ids.append(ent["anatomy"])
                 entities.append(ent)
 
-    # anatomy
+    # Anatomy
+    # TODO: anatomy包含関係 knowledge-based
     for a in [e for e in doc.entities if e.id in anatomy_ids]:
         anat = {
             "id": a.id,
@@ -510,26 +516,73 @@ def to_json(tcs: List[TimeContainer], doc: Document) -> str:
 
         anatomy.append(anat)
 
-    # start/end/after/beforeだけついてるentの取り扱い
+    garbage_ = []
+    rest_ids = {doe.id for doe in doc.entities} - {
+        ale.id for tc in tcs for ale in tc.all_ents()
+    }
+    for doe in doc.entities:
+        if doe.id in rest_ids:
+            # TCに入っておらず，start/end/after/beforeだけついてるentの取り扱い
+            ts = infer_timespan(doe, tcs)
+            if ts:
+                rest_ent = embed_an_entity(doe)
+                rest_ent["time"] = ts
+                entities.append(rest_ent)
+            else:
+                if garbage:  # どこにも入ってないものをgarbageにいれる
+                    garbage_.append(embed_an_entity(doe))
 
-    # TODO: 入ってないものをgarbageにいれる
-    garbage = []
+    ret = {"entities": entities, "times": times, "anatomy": anatomy}
+    if garbage:
+        ret["garbage"] = garbage_
 
-    return json.dumps(
-        {"entities": entities, "times": times, "anatomy": anatomy, "garbage": garbage},
-        ensure_ascii=False,
-        indent=2,
-    )
+    return json.dumps(ret, ensure_ascii=False, indent=2)
 
 
-def embed_entity(e, tcs):
+def find_head_id(id_: Id, tcs: List[TimeContainer]) -> Id:
+    for tc in tcs:
+        if id_ in [e.id for e in tc.all_ents()]:
+            return tc.head.id
+    return Id(0)
+
+
+def infer_timespan(e, tcs, in_a_tc=None):
+    # FIXME: after/before, combinations with on and others
+    if set(e.rels_to.keys()) & set(Relation.time_rels):
+        if "start" in e.rels_to and "end" in e.rels_to:
+            start_id = find_head_id(list(e.rels_to["start"])[0].id, tcs)
+            end_id = find_head_id(list(e.rels_to["end"])[0].id, tcs)
+            return [start_id, end_id]
+        elif "on" in e.rels_to:
+            if in_a_tc:
+                on_id = in_a_tc.head.id
+            else:
+                on_id = find_head_id(list(e.rels_to["end"])[0].id, tcs)
+            return [on_id, on_id]
+    return []
+
+
+def embed_an_entity(e):
     ent = {
         "id": e.id,
         "tag": e.tag,
         "text": e.text,
         "change": [],
         "region": {},
+        "value": [],
     }
+    if "certainty" in e.attrs:
+        ent["certainty"] = e.attrs["certainty"]
+    elif "state" in e.attrs:
+        ent["state"] = e.attrs["state"]
+
+    return ent
+
+
+def embed_entity(e, tcs, in_a_tc=None):
+    ent = embed_an_entity(e)
+
+    ent["time"] = infer_timespan(e, tcs, in_a_tc=in_a_tc)
 
     if "feature" in e.rels_from:
         ent["feature"] = [f.text for f in e.rels_from["feature"]]
@@ -546,31 +599,27 @@ def embed_entity(e, tcs):
         ent["region"] = []
 
     if "region" in e.rels_from:
+        # FIXME: 複数部位に属する可能性はあるが無視
         ent["anatomy"] = list(e.rels_from["region"])[0].id
 
     if "change" in e.rels_from:
         for cha in e.rels_from["change"]:
             if "compare" in cha.rels_to:
+                # FIXME: compareを持たないものは無視する
                 # compare先は1個だけのはず…
-                ent["change"].append(
-                    {
-                        "text": cha.text,
-                        "compare": find_head_id(
-                            list(cha.rels_to["compare"])[0].id, tcs
-                        ),
-                    }
-                )
+                comp_to = list(cha.rels_to["compare"])[0]
+                if comp_to.tag != "TIMEX3":
+                    # FIXME: How to visualise non-time comparison?
+                    continue
+                comp_to_time = find_head_id(comp_to.id, tcs)
+                ent["change"].append({"text": cha.text, "compare": comp_to_time})
+                ent["time"][0] = comp_to_time  # FIXME: compareは前の時点だけ…のはず
 
-    # TODO: time span (based on TC.head.id)
+    if "value" in e.rels_to:
+        for val in e.rels_to["value"]:
+            ent["value"].append(embed_an_entity(val))
 
     return ent
-
-
-def find_head_id(id_: Id, tcs: List[TimeContainer]) -> Id:
-    for tc in tcs:
-        if id_ in [e.id for e in tc.all_ents()]:
-            return tc.head.id
-    return Id(0)
 
 
 def main(filename_r: str, dct: str) -> None:
