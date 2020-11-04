@@ -55,7 +55,9 @@ def recover_on(doc: Document) -> None:
                             ]
                         ) or bool(dct_rel)
                         # debug_print("  has_time =", has_time)
-                        if not has_time:
+                        is_gen = e.attrs.get("certainty") == "general"
+                        is_oth = e.attrs.get("state") == "other"
+                        if not has_time and not (is_gen or is_oth):
                             # on-rel is not needed if e has other time rels
                             if on_scope == -1:  # == DCT
                                 doc.update_attribute("DCT-Rel", e.id, "on")
