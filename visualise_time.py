@@ -1,4 +1,5 @@
 """Visualise time containers from annotation."""
+from collections import Counter
 from typing import List, Dict, Set, Optional, Iterable
 from datetime import datetime, timedelta
 import re
@@ -52,8 +53,7 @@ class TimeContainer:
         return self.t_ents | self.b_ents
 
     def fix_normtime_value(self) -> None:
-        """if time and date exists, update time's date to date's date.
-        """
+        """if time and date exists, update time's date to date's date."""
         dates = [timex for timex in self.t_ents if timex.attrs["type"] == "DATE"]
         dateset: Set[str] = set()
         for date in dates:
@@ -270,7 +270,9 @@ def split_tc(tc: TimeContainer) -> List[TimeContainer]:
                     a_tc = TimeContainer()
                     a_tc = make_tc_helper(dur, a_tc, to_=False)
                     dur_date_val = parse_duration_value(
-                        dur.attrs["value"], date=the_date, neg=type_ == "end",
+                        dur.attrs["value"],
+                        date=the_date,
+                        neg=type_ == "end",
                     )
                     dur_date = Entity(
                         Id(dur.id + 10000), "TIMEX3", (-2, -1), dur_date_val
@@ -467,61 +469,60 @@ def normalise_all_timex(doc: Document, dct: str) -> None:
             # the return of `normalize` follows TimeL's 'value' spec
 
 
-def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = False) -> str:
+def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = True) -> str:
     times = []
     entities = []
-    anatomy = []
     anatomy_ids = []
+    embeded_ids = []
 
     # time and entities
     for tc in tcs:
         if PTN_DATE.match(tc.head.attrs["value"]):
-            times.append(
-                {
-                    "id": tc.head.id,
-                    "text": tc.head.text,
-                    "value": tc.head.attrs["value"],
-                    "type": tc.head.attrs["type"],
-                }
-            )
-            for b in tc.b_ents:
-                if b.tag in ["Change", "Feature"]:
-                    continue
-                elif "value" in b.rels_from:
-                    continue
-                ent = embed_entity(b, tcs, in_a_tc=tc)
-                if "anatomy" in ent:
-                    anatomy_ids.append(ent["anatomy"])
-                entities.append(ent)
+            date_val = tc.head.attrs["value"]
+        else:
+            date_val = ""
+        times.append(
+            {
+                "id": tc.head.id,
+                "text": tc.head.text,
+                "value": date_val,
+                "type": tc.head.attrs["type"],
+            }
+        )
+        embeded_ids.extend([t.id for t in tc.t_ents])
+        for b in tc.b_ents:
+            if b.tag in ["Change", "Feature"]:
+                continue
+            elif "value" in b.rels_from:
+                # valueはkeyからたどるので取らない
+                # TODO: 孤立value?
+                continue
+            ent = embed_entity(b, tcs, embeded_ids, in_a_tc=tc)
+            if "anatomy" in ent:
+                # 入れ子regionの親だけとる
+                anatomy_ids.append(ent["anatomy"])
+            entities.append(ent)
+
+    # print(json.dumps(entities, ensure_ascii=False, indent=2))
+    # de-duplicate top-level entities
+    c = Counter(embeded_ids)
+    dup_ids = [k for k, v in c.items() if v > 1]
+    entities = [entity for entity in entities if entity["id"] not in dup_ids]
 
     # Anatomy
+    # FIXME: all anotomy, anyway
     # TODO: anatomy包含関係 knowledge-based
-    for a in [e for e in doc.entities if e.id in anatomy_ids]:
-        anat = {
-            "id": a.id,
-            "text": a.text,
-        }
-
-        if "feature" in a.rels_from:
-            anat["feature"] = [f.text for f in a.rels_from["feature"]]
-        else:
-            anat["feature"] = []
-
-        if "region" in a.rels_to:
-            anat["contain"] = [
-                reg.id for reg in a.rels_to["region"] if reg.tag == "Anatomical"
-            ]
-        else:
-            anat["contain"] = []
-
-        anatomy.append(anat)
+    root_anatomicals = [
+        # e for e in doc.entities if e.id in anatomy_ids and e.id not in set(embeded_ids)
+        e
+        for e in doc.entities
+        if e.tag in "Anatomical" and e.id not in set(embeded_ids)
+    ]
+    anatomy = [embed_anatomy(a, embeded_ids) for a in root_anatomicals]
 
     garbage_ = []
-    rest_ids = {doe.id for doe in doc.entities} - {
-        ale.id for tc in tcs for ale in tc.all_ents()
-    }
     for doe in doc.entities:
-        if doe.id in rest_ids:
+        if doe.id not in embeded_ids:
             # TCに入っておらず，start/end/after/beforeだけついてるentの取り扱い
             ts = infer_timespan(doe, tcs)
             if ts:
@@ -529,8 +530,8 @@ def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = False) -> s
                 rest_ent["time"] = ts
                 entities.append(rest_ent)
             else:
-                if garbage:  # どこにも入ってないものをgarbageにいれる
-                    garbage_.append(embed_an_entity(doe))
+                # どこにも入ってないものをgarbageにいれる
+                garbage_.append(embed_an_entity(doe))
 
     ret = {"entities": entities, "times": times, "anatomy": anatomy}
     if garbage:
@@ -557,7 +558,7 @@ def infer_timespan(e, tcs, in_a_tc=None):
             if in_a_tc:
                 on_id = in_a_tc.head.id
             else:
-                on_id = find_head_id(list(e.rels_to["end"])[0].id, tcs)
+                on_id = find_head_id(list(e.rels_to["on"])[0].id, tcs)
             return [on_id, on_id]
     return []
 
@@ -579,28 +580,62 @@ def embed_an_entity(e):
     return ent
 
 
-def embed_entity(e, tcs, in_a_tc=None):
+def embed_anatomy(a, embeded_ids):
+    anat = {"id": a.id, "text": a.text, "feature": [], "contain": []}
+    embeded_ids.append(a.id)
+
+    if "feature" in a.rels_from:
+        anat["feature"] = [f.text for f in a.rels_from["feature"]]
+        embeded_ids.extend([f.id for f in a.rels_from["feature"]])
+
+    if "region" in a.rels_to:
+        anat["contain"] = [
+            reg.id for reg in a.rels_to["region"] if reg.tag == "Anatomical"
+        ]
+
+    # TODO: if "change" in a.rels_from:
+
+    return anat
+
+
+def embed_entity(e, tcs, embeded_ids, anat=None, in_a_tc=None):
     ent = embed_an_entity(e)
+    embeded_ids.append(e.id)
 
     ent["time"] = infer_timespan(e, tcs, in_a_tc=in_a_tc)
 
     if "feature" in e.rels_from:
         ent["feature"] = [f.text for f in e.rels_from["feature"]]
+        embeded_ids.extend([f.id for f in e.rels_from["feature"]])
     else:
         ent["feature"] = []
 
+    if anat:
+        ent["anatomy"] = anat
+    elif "region" in e.rels_from:
+        parent = [reg for reg in e.rels_from["region"] if reg.tag == "Anatomical"]
+        if parent:
+            # FIXME: 複数部位に属する可能性はあるが無視
+            ent["anatomy"] = parent.pop().id
+
     if "region" in e.rels_to:
         for reg in e.rels_to["region"]:
-            if reg.tag == "Anatomical" and "region" in reg.rels_to:
+            if "region" in reg.rels_to:
+                # E.g. e = "腫瘤", reg = "内部", reg.rels_to["region"] = ["すりガラス影", ...]
                 ent["region"][reg.text] = [
-                    embed_entity(contained, tcs) for contained in reg.rels_to["region"]
+                    embed_entity(contained, tcs, embeded_ids, anat=ent.get("anatomy"))
+                    for contained in reg.rels_to["region"]
                 ]
-    else:
-        ent["region"] = []
-
-    if "region" in e.rels_from:
-        # FIXME: 複数部位に属する可能性はあるが無視
-        ent["anatomy"] = list(e.rels_from["region"])[0].id
+            else:
+                if reg.tag == "Disease":
+                    # E.g. e = "腫瘤", reg = "充実部分" => {"充実部分": {<d>充実部分</d>}} (redundant, though)
+                    ent["region"][reg.text] = [
+                        embed_entity(reg, tcs, embeded_ids, anat=ent.get("anatomy"))
+                    ]
+                elif reg.tag == "Anatomical":
+                    # TODO: ill-defined case
+                    # E.g. 腫瘤の内部は著編ありません
+                    ent["region"][reg.text] = [embed_anatomy(reg, embeded_ids)]
 
     if "change" in e.rels_from:
         for cha in e.rels_from["change"]:
@@ -613,36 +648,49 @@ def embed_entity(e, tcs, in_a_tc=None):
                     continue
                 comp_to_time = find_head_id(comp_to.id, tcs)
                 ent["change"].append({"text": cha.text, "compare": comp_to_time})
+                embeded_ids.append(cha.id)
                 ent["time"][0] = comp_to_time  # FIXME: compareは前の時点だけ…のはず
 
     if "value" in e.rels_to:
         for val in e.rels_to["value"]:
             ent["value"].append(embed_an_entity(val))
+            embeded_ids.append(val.id)
 
     return ent
 
 
-def main(filename_r: str, dct: str) -> None:
+def trace_region(embeded, e_ids):
+    e_ids.append(embeded["id"])
+    if embeded["region"]:
+        containeds = [cont for conts in embeded["region"].values() for cont in conts]
+        while containeds:
+            e_ids = trace_region(containeds.pop(), e_ids)
+    return e_ids
+
+
+def main(filename_r: str, dct: str, debug: bool = False, dot: bool = False) -> None:
     doc = Document(filename_r)
     relate_dct(doc)
     normalise_all_timex(doc, dct)
     containers = make_time_containers([e for e in doc.entities if e.tag == "TIMEX3"])
 
-    # # print(generate_tsv(containers))
-    # table: List[List[str]] = []
-    # contained_ids: List[Id] = []
-    # for container in containers:
-    #     contained_ids += [e.id for e in container.all_ents()]
-    #     tlist = [container.head] + list(container.t_ents - set([container.head]))
-    #     table.append([repr(ent) for ent in tlist + list(container.b_ents)])
-    # # containerに入らなかったのをまとめる for debug
-    # table.append(
-    #     [repr(entity) for entity in doc.entities if entity.id not in contained_ids]
-    # )
-    # print("\n".join(["\t".join(row) for row in table]))
-
-    print(to_json(containers, doc))
-    # print(generate_dot(doc))
+    if debug:
+        table: List[List[str]] = []
+        contained_ids: List[Id] = []
+        for container in containers:
+            contained_ids += [e.id for e in container.all_ents()]
+            tlist = [container.head] + list(container.t_ents - set([container.head]))
+            table.append([repr(ent) for ent in tlist + list(container.b_ents)])
+        # containerに入らなか���たのをまとめる for debug
+        table.append(
+            [repr(entity) for entity in doc.entities if entity.id not in contained_ids]
+        )
+        print("\n".join(["\t".join([str(i)] + row) for i, row in enumerate(table)]))
+    else:
+        if dot:
+            print(generate_dot(doc))
+        else:
+            print(to_json(containers, doc))
 
 
 if __name__ == "__main__":
