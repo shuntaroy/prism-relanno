@@ -2,6 +2,14 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 import pandas as pd
 import fire
+from tqdm import tqdm
+
+# pd.set_option("display.max_colwidth", None)
+pd.set_option("display.unicode.east_asian_width", True)
+pd.set_option("display.unicode.ambiguous_as_wide", True)
+pd.set_option("display.max_rows", None)
+# pd.set_option("display.max_columns", None)
+pd.set_option("display.max_colwidth", 15)
 
 TAGNAMES = {
     "d": "Disease",
@@ -28,12 +36,14 @@ def len_null(a):
 
 
 def get_plain_text(root):
-    return "".join(root.itertext())
+    return "".join(root.itertext()).lstrip()
 
 
 def root_to_df(root, plain_text):
     csr = 0
     data = []
+    root.text = root.text.lstrip()
+    root.tail = None
     for e in root.iter():
         st, ed = csr, csr + len(e.text) if e.text else csr
         orig_snip = plain_text[st:ed]
@@ -63,7 +73,7 @@ def root_to_df(root, plain_text):
                 "matchOrig",
             ],
         )
-    assert df.iloc[1:]["matchOrig"].all(), df
+    assert df.iloc[1:]["matchOrig"].all(), "\n" + str(df)
     return df
 
 
@@ -106,15 +116,36 @@ def df_to_attrstrs(df):
     )
 
 
+def get_first_child(elem):
+    it = elem.iter()
+    next(it)  # == elem itself
+    return next(it)
+
+
+def get_real_root(elem):
+    child = get_first_child(elem)
+    if child.tag not in TAGNAMES.keys():
+        return get_real_root(child)
+    else:
+        return elem
+
+
 def main(dirpath, output_path):
     p = Path(dirpath)
+    assert p.is_dir()
+    p_lst = list(p.iterdir())
     outp = Path(output_path)
-    for i in p.iterdir():
+    if not outp.exists():
+        outp.mkdir()
+    for i in tqdm(p_lst):
         if i.name.startswith("."):
             continue
         if i.is_file():
             try:
                 root = ET.parse(i).getroot()
+                # if wrapped further by metadata elements like PERSON, ARTICLE
+                # need to find the real "root"
+                root = get_real_root(root)
             except ET.ParseError:
                 with open(i, "r") as f:
                     cont = f.read()
@@ -123,7 +154,9 @@ def main(dirpath, output_path):
             try:
                 df = root_to_df(root, plain_text)
             except AssertionError as e:
-                print(i)
+                print()
+                print()
+                print("Error occured in:", i)
                 raise e
             tagstrs = df_to_tagstrs(df)
             attrstrs = df_to_attrstrs(df)
@@ -132,8 +165,10 @@ def main(dirpath, output_path):
             with open(outp / i.with_suffix(".txt").name, "w") as outf:
                 outf.write(plain_text)
         if i.is_dir():
+            print("Dig into a child folder:", str(i))
             main(str(i), output_path)
 
 
 if __name__ == "__main__":
     fire.Fire(main)
+    # NOTE: only compatible with the 1-doc-per-file format
