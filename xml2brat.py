@@ -20,7 +20,7 @@ TAGNAMES = {
     "t-test": "TestTest",
     "t-key": "TestKey",
     "t-val": "TestVal",
-    "m-key": "Medicinekey",
+    "m-key": "MedicineKey",
     "m-val": "MedicineVal",
     "cc": "ClinicalContext",
     "r": "Remedy",
@@ -74,7 +74,7 @@ def root_to_df(root, plain_text):
             ],
         )
     assert df.iloc[1:]["matchOrig"].all(), "\n" + str(df)
-    return df
+    return df.iloc[1:]
 
 
 def row_to_tagstr(row):
@@ -89,14 +89,10 @@ def row_to_tagstr(row):
 
 
 def df_to_tagstrs(df):
-    return (
-        df.iloc[1:]  # skip root
-        .apply(
-            row_to_tagstr,
-            axis=1,
-        )
-        .to_list()
-    )
+    return df.apply(
+        row_to_tagstr,
+        axis=1,
+    ).to_list()
 
 
 def row_to_attrstr(row):
