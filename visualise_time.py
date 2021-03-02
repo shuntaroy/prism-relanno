@@ -16,6 +16,8 @@ from visualise_rel import CLR, DOTHEAD
 
 # TODO: merge visualise_rel.py with this code
 
+# TODO: use dataclass for type annotation in the embedding procedures
+
 # NOTE: relevant time expression parsers/rules are available in timex_modules/
 
 PTN_DATE = re.compile(r"\d\d\d\d-\d\d-\d\d")
@@ -428,7 +430,6 @@ def generate_dot(doc: Document) -> str:
     for ix, container in enumerate(containers):
         # TODO: 全部をrank=sameのsubgraphにするときっと一列になる
         # まずは rank constraint なしで time container を cluster subgraph として様子見
-        # FIXME: container をまるっと可視化してるだけ
         output += (
             f"subgraph cluster{ix}{{ rank=same; ordering=out;"
             + "; ".join([f"T{e.id}" for e in container.all_ents()])
@@ -681,7 +682,6 @@ def main(filename_r: str, dct: str, debug: bool = False, dot: bool = False) -> N
             contained_ids += [e.id for e in container.all_ents()]
             tlist = [container.head] + list(container.t_ents - set([container.head]))
             table.append([repr(ent) for ent in tlist + list(container.b_ents)])
-        # containerに入らなか���たのをまとめる for debug
         table.append(
             [repr(entity) for entity in doc.entities if entity.id not in contained_ids]
         )
