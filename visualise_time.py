@@ -4,6 +4,7 @@ from typing import List, Dict, Set, Optional, Iterable
 from datetime import datetime, timedelta
 import re
 import json
+import sys
 
 import fire
 from dateutil.relativedelta import relativedelta
@@ -23,6 +24,8 @@ from visualise_rel import CLR, DOTHEAD
 PTN_DATE = re.compile(r"\d\d\d\d-\d\d-\d\d")
 PTN_MONTH = re.compile(r"\d\d\d\d-\d\d")
 PTN_YEAR = re.compile(r"\d\d\d\d")
+
+TREL_NOT_ON = set(["before", "after", "start", "end"])
 
 
 def generate_dot(doc: Document) -> str:
@@ -152,21 +155,32 @@ class TimeContainer:
             else:
                 raise ValueError(f"No TIMEX inside: {self.all_ents()}")
 
-    def __lt__(self, other):
+    def __lt__(self, other):  # self < other
         m_date_self = PTN_DATE.search(self.head.attrs["value"])
         m_date_other = PTN_DATE.search(other.head.attrs["value"])
         if m_date_self and m_date_other:
-            dt_self = datetime.fromisoformat(m_date_self.group(0))
-            dt_other = datetime.fromisoformat(m_date_other.group(0))
+            try:
+                dt_self = datetime.fromisoformat(m_date_self.group(0))
+                dt_other = datetime.fromisoformat(m_date_other.group(0))
+            except:
+                print(self.head, file=sys.stderr)
+                print(repr(m_date_self), file=sys.stderr)
+                print(repr(m_date_other), file=sys.stderr)
+                raise
             return dt_self < dt_other
         else:
+            # no "value" for TIMEX, infer time relations
+            # NOTE: based only on two TCs, perfect inference is not possible
+            # see sort_tcs()'s latter processing
             for t_ent in self.t_ents:
+                # no need to check rels_from because it syncs to rels_to
                 for type_, ents in t_ent.rels_to.items():
                     if ents & other.t_ents:
                         if type_ in ["before", "end"]:
                             return True
                         elif type_ in ["after", "start"]:
                             return False
+
             # raise ValueError("Both TimeContainers in comparison must have head TIMEX3.")
             # FIXME: ad-hock operation for List[TC] sorting
             # list.sort() only uses __lt__()
@@ -174,12 +188,17 @@ class TimeContainer:
             return False
 
     def __le__(self, other):
-        if self.head and other.head:
-            dt_self = datetime.fromisoformat(self.head.attrs["value"][:10])
-            dt_other = datetime.fromisoformat(other.head.attrs["value"][:10])
-            return dt_self <= dt_other
+        if self.__lt__(other):
+            return True
         else:
-            raise ValueError("Both TimeContainers in comparison must have head TIMEX3.")
+            if self.head and other.head:
+                dt_self = datetime.fromisoformat(self.head.attrs["value"][:10])
+                dt_other = datetime.fromisoformat(other.head.attrs["value"][:10])
+                return dt_self <= dt_other
+            else:
+                raise ValueError(
+                    "Both TimeContainers in comparison must have head TIMEX3."
+                )
 
     def __eq__(self, other):
         if self.head and other.head:
@@ -188,26 +207,13 @@ class TimeContainer:
             raise ValueError("Both TimeContainers in comparison must have head TIMEX3.")
 
     def __ne__(self, other):
-        if self.head and other.head:
-            return self.head.attrs["value"][:10] != other.head.attrs["value"][:10]
-        else:
-            raise ValueError("Both TimeContainers in comparison must have head TIMEX3.")
+        return not self.__eq__(other)
 
     def __ge__(self, other):
-        if self.head and other.head:
-            dt_self = datetime.fromisoformat(self.head.attrs["value"][:10])
-            dt_other = datetime.fromisoformat(other.head.attrs["value"][:10])
-            return dt_self >= dt_other
-        else:
-            raise ValueError("Both TimeContainers in comparison must have head TIMEX3.")
+        return other.__le__(self)
 
-    def __gt__(self, other):
-        if self.head and other.head:
-            dt_self = datetime.fromisoformat(self.head.attrs["value"][:10])
-            dt_other = datetime.fromisoformat(other.head.attrs["value"][:10])
-            return dt_self > dt_other
-        else:
-            raise ValueError("Both TimeContainers in comparison must have head TIMEX3.")
+    def __gt__(self, other):  # self > other
+        return other.__lt__(self)
 
 
 def make_time_containers(entities: List[Entity]) -> List[TimeContainer]:
