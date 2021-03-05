@@ -25,6 +25,54 @@ PTN_MONTH = re.compile(r"\d\d\d\d-\d\d")
 PTN_YEAR = re.compile(r"\d\d\d\d")
 
 
+def generate_dot(doc: Document) -> str:
+    """Draw a chronologically aligned dot graph."""
+    # output = DOTHEAD
+    output = "digraph G {rankdir=LR; newrank=true; node [shape=box,style=filled,fontname=Helvetica]"
+    entities = doc.entities
+    # entities = [e for e in doc.entities if e.tag == "TIMEX3"]
+    # ids = [e.id for e in entities]
+    # Define all nodes first
+    for ent in entities:
+        if ent.id == Id(-1):
+            ent.id = Id(10000)
+        label = vr._make_dot_label(ent)
+        output += f'T{ent.id}  [label="{label}",fillcolor="{CLR[ent.tag]}"];\n'
+    for rel in doc.relations:
+        if rel.name in rel.basic_rels:
+            output += f'T{rel.arg1} -> T{rel.arg2} [label="{rel.name}"];\n'
+        # if rel.arg1 in ids and rel.arg2 in ids:
+        if rel.name in rel.time_rels and not rel.name.startswith("o"):
+            # NOTE: dirty hack for negative id nodes (DCT, in our case)
+            if rel.arg1 == Id(-1):
+                rel.arg1 = Id(10000)
+            if rel.arg2 == Id(-1):
+                rel.arg2 = Id(10000)
+            output += f'T{rel.arg1} -> T{rel.arg2} [label="{rel.name}",color="magenta",fontcolor="magenta"];\n'
+
+    # create time containers
+    containers = make_time_containers([e for e in doc.entities if e.tag == "TIMEX3"])
+
+    # define the timeline
+    # FIXME: chronological ordering
+    output += "{ "
+    output += " -> ".join([f"T{container.head.id}" for container in containers])
+    output += " [arrowhead=none] }\n"
+
+    for ix, container in enumerate(containers):
+        # TODO: 全部をrank=sameのsubgraphにするときっと一列になる
+        # まずは rank constraint なしで time container を cluster subgraph ��して様子見
+        output += (
+            f"subgraph cluster{ix}{{ rank=same; ordering=out;"
+            + "; ".join([f"T{e.id}" for e in container.all_ents()])
+            # + "; ".join([f"T{e.id}" for e in container.t_ents])
+            + "; }\n"
+        )
+
+    output += "}\n"
+    return output
+
+
 class TimeContainer:
     def __init__(self, ents: Optional[List[Entity]] = None):
         self.b_ents: Set[Entity] = set()
@@ -393,53 +441,6 @@ def sort_tcs(tcs: List[TimeContainer]) -> None:
     tcs.sort()
 
 
-def generate_dot(doc: Document) -> str:
-    """Draw a chronologically aligned dot graph."""
-    # output = DOTHEAD
-    output = "digraph G {rankdir=LR; newrank=true; node [shape=box,style=filled,fontname=Helvetica]"
-    entities = doc.entities
-    # entities = [e for e in doc.entities if e.tag == "TIMEX3"]
-    # ids = [e.id for e in entities]
-    # Define all nodes first
-    for ent in entities:
-        if ent.id == Id(-1):
-            ent.id = Id(10000)
-        label = vr._make_dot_label(ent)
-        output += f'T{ent.id}  [label="{label}",fillcolor="{CLR[ent.tag]}"];\n'
-    for rel in doc.relations:
-        if rel.name in rel.basic_rels:
-            output += f'T{rel.arg1} -> T{rel.arg2} [label="{rel.name}"];\n'
-        # if rel.arg1 in ids and rel.arg2 in ids:
-        if rel.name in rel.time_rels and not rel.name.startswith("o"):
-            # NOTE: dirty hack for negative id nodes (DCT, in our case)
-            if rel.arg1 == Id(-1):
-                rel.arg1 = Id(10000)
-            if rel.arg2 == Id(-1):
-                rel.arg2 = Id(10000)
-            output += f'T{rel.arg1} -> T{rel.arg2} [label="{rel.name}",color="magenta",fontcolor="magenta"];\n'
-
-    # create time containers
-    containers = make_time_containers([e for e in doc.entities if e.tag == "TIMEX3"])
-
-    # define the timeline
-    # FIXME: chronological ordering
-    output += "{ "
-    output += " -> ".join([f"T{container.head.id}" for container in containers])
-    output += " [arrowhead=none] }\n"
-
-    for ix, container in enumerate(containers):
-        # TODO: 全部をrank=sameのsubgraphにするときっと一列になる
-        # まずは rank constraint なしで time container を cluster subgraph として様子見
-        output += (
-            f"subgraph cluster{ix}{{ rank=same; ordering=out;"
-            + "; ".join([f"T{e.id}" for e in container.all_ents()])
-            # + "; ".join([f"T{e.id}" for e in container.t_ents])
-            + "; }\n"
-        )
-
-    output += "}\n"
-    return output
-
 
 def relate_dct(doc: Document) -> None:
     """Convert DCT-Rel to a Relation."""
@@ -534,7 +535,12 @@ def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = True) -> st
                 # どこにも入ってないものをgarbageにいれる
                 garbage_.append(embed_an_entity(doe))
 
-    ret = {"entities": entities, "times": times, "anatomy": anatomy}
+    ret = {
+        "entities": entities,
+        "times": times,
+        "anatomy": anatomy,
+        "html": doc.to_html(),
+    }
     if garbage:
         ret["garbage"] = garbage_
 
@@ -616,7 +622,7 @@ def embed_entity(e, tcs, embeded_ids, anat=None, in_a_tc=None):
     elif "region" in e.rels_from:
         parent = [reg for reg in e.rels_from["region"] if reg.tag == "Anatomical"]
         if parent:
-            # FIXME: 複数部位に属する可能性はあるが無視
+            # FIXME: 複数部位に属する可��性はあるが無視
             ent["anatomy"] = parent.pop().id
 
     if "region" in e.rels_to:

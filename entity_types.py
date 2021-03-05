@@ -2,6 +2,9 @@
 from __future__ import annotations
 import sys
 from typing import List, Dict, Tuple, NewType, TypeVar, Set
+from pathlib import Path
+from xml.sax import xmlreader, saxutils
+import io
 
 Id = NewType("Id", int)
 A = TypeVar("A")
@@ -9,6 +12,22 @@ A = TypeVar("A")
 # TODO: one source of truth
 # TODO: xml string parsing
 # TODO: xml output with original texts
+
+BRAT2HTML = {
+    "Disease": "disease",
+    "Anatomical": "anatomical",
+    "Feature": "feature",
+    "Change": "change",
+    "TIMEX3": "TIMEX3",
+    "TestTest": "testtest",
+    "TestKey": "testkey",
+    "TestVal": "testval",
+    "MedicineKey": "medkey",
+    "MedicineVal": "medval",
+    "ClinicalContext": "cc",
+    "Remedy": "remedy",
+    "Pending": "pending",
+}
 
 
 class Relation:
@@ -142,7 +161,10 @@ class Entity:
         _id, raw_span, text = raw_line.split("\t")
         tag, begin, end = raw_span.split(" ")
         return cls(
-            _id=Id(int(_id[1:])), tag=tag, span=(int(begin), int(end)), text=text,
+            _id=Id(int(_id[1:])),
+            tag=tag,
+            span=(int(begin), int(end)),
+            text=text,
         )
 
     def __repr__(self):
@@ -225,9 +247,15 @@ class Document:
         self.update_needed = False
         # if True, there is relation/attribute updates, implying the need for update to self.relations/attributes
 
-        with open(filename, "r") as fi:
-            for line in fi:
-                self._read_ann_line(line.strip())
+        p = Path(filename)
+        if p.suffix == ".ann":
+            with open(p, "r") as fi:
+                for line in fi:
+                    self._read_ann_line(line.strip())
+            with open(p.with_suffix(".txt"), "r") as ftxt:
+                self.txt = ftxt.read()
+        else:
+            raise ValueError("Specify BRAT .ann file.")
 
         self._build_doc()
 
@@ -370,3 +398,53 @@ class Document:
             for a in anno:
                 if a is not None:
                     print(a, file=fout)
+
+    def to_html(self, standalone: bool = False) -> str:
+        # dismiss all "relation" info; only output NEs
+        if standalone:
+            # return a complete html
+            raise NotImplementedError
+
+        self.sortedby_occurrence()
+        ents = self.entities[:]  # shallow copy
+
+        output = io.StringIO()
+        attr_doc = xmlreader.AttributesImpl({"class": "ner-doc"})
+        xmldoc = saxutils.XMLGenerator(output, encoding="UTF-8")
+        # xmldoc.startDocument()  # => <?xml version...>
+        xmldoc.startElement("div", attr_doc)  # => <div>
+        cursor = 0
+        while ents:
+            ent = ents.pop(0)
+            if ent.id < 0 or ent.span[0] < 0:  # some special entities like DCT
+                continue
+
+            if cursor < ent.span[0]:
+                xmldoc.characters(self.txt[cursor : ent.span[0]])
+            attr = xmlreader.AttributesImpl(self._attrdict(ent))
+            xmldoc.startElement("span", attr)
+            assert self.txt[ent.span[0] : ent.span[1]] == ent.text
+            xmldoc.characters(ent.text)
+            xmldoc.endElement("span")
+            cursor = ent.span[1]
+
+        if cursor < len(self.txt) - 1:
+            xmldoc.characters(self.txt[cursor:-1])
+
+        xmldoc.endElement("div")  # => </body>
+        # xmldoc.endDocument()  # => kinda .close()
+        html = output.getvalue()
+        html = html.replace("\n", "<br>")
+        output.close()  # clear memory
+
+        return html
+
+    def _attrdict(self, ent: Entity) -> Dict[str, str]:
+        if "certainty" in ent.attrs:
+            htmlclass = f"{BRAT2HTML[ent.tag]}-{ent.attrs['certainty']}"
+        elif "state" in ent.attrs:
+            htmlclass = f"{BRAT2HTML[ent.tag]}-{ent.attrs['state']}"
+        else:
+            htmlclass = f"{BRAT2HTML[ent.tag]}"
+
+        return {"id": f"T{ent.id}", "class": htmlclass}
