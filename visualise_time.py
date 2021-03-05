@@ -450,15 +450,22 @@ def merge_tcs(tcs: List[TimeContainer]) -> List[TimeContainer]:
 def sort_tcs(tcs: List[TimeContainer]) -> None:
     """Sort time containers.
 
-    Assume normalised values available.
+    Assume normalised time values available.
     """
     # sort by head as much as possible -> sortable, unsortable
     # try to infer time relations container-wise
     for tc in tcs:
         tc.find_head_timex()  # just in case
 
+    # __lt__() based sorting is imperfect for empty value timex
     tcs.sort()
 
+    # TODO: resolve relative TC's position among absolute TCs
+    # relative_tcs = [tc for tc in tcs if not tc.head.attrs["value"]]
+    # absolute_tcs = [tc for tc in tcs if tc.head.attrs["value"]]
+    #
+    # for rtc in relative_tcs:
+    #     rtc.t_ents
 
 
 def relate_dct(doc: Document) -> None:
