@@ -270,8 +270,21 @@ def make_time_containers(entities: List[Entity]) -> List[TimeContainer]:
         # print()
 
     sort_tcs(time_containers)
+    time_containers = [tc for tc in time_containers if not is_isolate_tc(tc)]
 
     return time_containers
+
+
+def is_isolate_tc(tc: TimeContainer) -> bool:
+    if tc.b_ents:
+        return False
+    else:
+        for t_ent in tc.t_ents:
+            if t_ent.rels_to.keys() & TREL_NOT_ON:
+                return False
+            elif t_ent.rels_from.keys() & TREL_NOT_ON:
+                return False
+    return True
 
 
 def make_tc_helper(
