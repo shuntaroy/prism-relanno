@@ -499,7 +499,7 @@ def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = True) -> st
                 # valueはkeyからたどるので取らない
                 # TODO: 孤立value?
                 continue
-            ent = embed_entity(b, tcs, embeded_ids, in_a_tc=tc)
+            ent = embed_entity(b, tcs, embeded_ids, on_a_tc=tc)
             if "anatomy" in ent:
                 # 入れ子regionの親だけとる
                 anatomy_ids.append(ent["anatomy"])
@@ -554,20 +554,87 @@ def find_head_id(id_: Id, tcs: List[TimeContainer]) -> Id:
     return Id(0)
 
 
-def infer_timespan(e, tcs, in_a_tc=None):
-    # FIXME: after/before, combinations with on and others
-    if set(e.rels_to.keys()) & set(Relation.time_rels):
-        if "start" in e.rels_to and "end" in e.rels_to:
-            start_id = find_head_id(list(e.rels_to["start"])[0].id, tcs)
-            end_id = find_head_id(list(e.rels_to["end"])[0].id, tcs)
+def is_earlier(tid1, tid2, tcs):
+    head_ids = [tc.head.id for tc in tcs]
+    ix_tid1 = head_ids.index(tid1)
+    ix_tid2 = head_ids.index(tid2)
+    return ix_tid1 < ix_tid2
+
+
+def infer_timespan(e, tcs, on_a_tc=None):
+    if not (set(e.rels_to.keys()) & set(Relation.time_rels)):
+        return []
+
+    if "start" in e.rels_to and "end" in e.rels_to:
+        start_id = find_head_id(list(e.rels_to["start"])[0].id, tcs)
+        end_id = find_head_id(list(e.rels_to["end"])[0].id, tcs)
+        if is_earlier(start_id, end_id, tcs):
             return [start_id, end_id]
-        elif "on" in e.rels_to:
-            if in_a_tc:
-                on_id = in_a_tc.head.id
-            else:
-                on_id = find_head_id(list(e.rels_to["on"])[0].id, tcs)
-            return [on_id, on_id]
-    return []
+
+    elif "start" in e.rels_to and "before" in e.rels_to:
+        start_id = find_head_id(list(e.rels_to["start"])[0].id, tcs)
+        before_id = find_head_id(list(e.rels_to["before"])[0].id, tcs)
+        if is_earlier(start_id, before_id, tcs):
+            return [start_id, before_id]
+        elif on_a_tc:
+            # before < start; CORRUPTED
+            if is_earlier(start_id, on_a_tc.head.id, tcs):
+                # assume "start" is reliable
+                return [start_id, on_a_tc.head.id]
+            elif is_earlier(on_a_tc.head.id, before_id, tcs):
+                # assume "before" is reliable
+                return [on_a_tc.head.id, before_id]
+        else:
+            # assume "start" is reliable
+            return [start_id, tcs[-1].head.id]
+
+    elif "end" in e.rels_to and "after" in e.rels_to:
+        after_id = find_head_id(list(e.rels_to["after"])[0].id, tcs)
+        end_id = find_head_id(list(e.rels_to["end"])[0].id, tcs)
+        if is_earlier(after_id, end_id, tcs):
+            return [after_id, end_id]
+        elif on_a_tc:
+            if is_earlier(after_id, on_a_tc.head.id, tcs):
+                return [after_id, on_a_tc.head.id]
+            if is_earlier(on_a_tc.head.id, end_id, tcs):
+                return [on_a_tc.head.id, end_id]
+        else:
+            return [after_id, tcs[-1].head.id]
+
+    elif "start" in e.rels_to:
+        start_id = find_head_id(list(e.rels_to["start"])[0].id, tcs)
+        if on_a_tc and is_earlier(start_id, on_a_tc.head.id, tcs):
+            return [start_id, on_a_tc.head.id]
+        else:
+            return [start_id, tcs[-1].head.id]
+
+    elif "end" in e.rels_to:
+        end_id = find_head_id(list(e.rels_to["end"])[0].id, tcs)
+        if on_a_tc and is_earlier(on_a_tc.head.id, end_id, tcs):
+            return [on_a_tc.head.id, end_id]
+        else:
+            return [tcs[0].head.id, end_id]
+
+    elif "after" in e.rels_to:
+        after_id = find_head_id(list(e.rels_to["after"])[0].id, tcs)
+        if on_a_tc and is_earlier(after_id, on_a_tc.head.id, tcs):
+            return [after_id, on_a_tc.head.id]
+        else:
+            return [after_id, tcs[-1].head.id]
+
+    elif "before" in e.rels_to:
+        before_id = find_head_id(list(e.rels_to["before"])[0].id, tcs)
+        if on_a_tc and is_earlier(on_a_tc.head.id, before_id, tcs):
+            return [on_a_tc.head.id, before_id]
+        else:
+            return [tcs[0].head.id, before_id]
+
+    elif "on" in e.rels_to:
+        if on_a_tc:
+            on_id = on_a_tc.head.id
+        else:
+            on_id = find_head_id(list(e.rels_to["on"])[0].id, tcs)
+        return [on_id, on_id]
 
 
 def embed_an_entity(e):
@@ -605,11 +672,11 @@ def embed_anatomy(a, embeded_ids):
     return anat
 
 
-def embed_entity(e, tcs, embeded_ids, anat=None, in_a_tc=None):
+def embed_entity(e, tcs, embeded_ids, anat=None, on_a_tc=None):
     ent = embed_an_entity(e)
     embeded_ids.append(e.id)
 
-    ent["time"] = infer_timespan(e, tcs, in_a_tc=in_a_tc)
+    ent["time"] = infer_timespan(e, tcs, on_a_tc=on_a_tc)
 
     if "feature" in e.rels_from:
         ent["feature"] = [f.text for f in e.rels_from["feature"]]
