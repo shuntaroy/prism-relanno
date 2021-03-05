@@ -126,7 +126,7 @@ def get_real_root(elem):
         return elem
 
 
-def main(dirpath, output_path):
+def main(dirpath, output_path, trav=False):
     p = Path(dirpath)
     assert p.is_dir()
     p_lst = list(p.iterdir())
@@ -136,7 +136,7 @@ def main(dirpath, output_path):
     for i in tqdm(p_lst):
         if i.name.startswith("."):
             continue
-        if i.is_file():
+        if i.is_file() and i.suffix == ".xml":
             try:
                 root = ET.parse(i).getroot()
                 # if wrapped further by metadata elements like PERSON, ARTICLE
@@ -145,7 +145,13 @@ def main(dirpath, output_path):
             except ET.ParseError:
                 with open(i, "r") as f:
                     cont = f.read()
-                root = ET.fromstring(f"<root>{cont}</root>")
+                try:
+                    root = ET.fromstring(f"<root>{cont}</root>")
+                except ET.ParseError as e:
+                    print()
+                    print()
+                    print("Error occured in:", i)
+                    raise e
             plain_text = get_plain_text(root)
             try:
                 df = root_to_df(root, plain_text)
@@ -160,7 +166,7 @@ def main(dirpath, output_path):
                 outf.write("\n".join(tagstrs + attrstrs))
             with open(outp / i.with_suffix(".txt").name, "w") as outf:
                 outf.write(plain_text)
-        if i.is_dir():
+        if i.is_dir() and trav:
             print("Dig into a child folder:", str(i))
             main(str(i), output_path)
 
