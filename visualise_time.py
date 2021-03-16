@@ -9,7 +9,7 @@ import sys
 import fire
 from dateutil.relativedelta import relativedelta
 from normtime import normalize
-
+from toposort import toposort_flatten, CircularDependencyError
 
 from entity_types import Id, Document, Entity, Relation
 import visualise_rel as vr
@@ -89,6 +89,9 @@ class TimeContainer:
         if ents:
             self.add_all(ents)
 
+    def __repr__(self):
+        return f"<TC head={repr(self.head)[1:-1]}>"
+
     def add(self, ent: Entity) -> None:
         if ent.tag == "TIMEX3":
             if "value" in ent.rels_from:
@@ -155,6 +158,22 @@ class TimeContainer:
             else:
                 raise ValueError(f"No TIMEX inside: {self.all_ents()}")
 
+    def rel_after(self, other):
+        """Return True if `self` happened after `other`, accodring to time relations only."""
+        # self -after-> other | self -start-> other
+        for t_ent in self.t_ents:
+            for type_, ents in t_ent.rels_to.items():
+                if ents & other.t_ents:
+                    if type_ in ["after", "start"]:
+                        return True
+        # self <-before- other | self <-end- other
+        for t_ent in other.t_ents:
+            for type_, ents in t_ent.rels_to.items():
+                if ents & self.t_ents:
+                    if type_ in ["before", "end"]:
+                        return True
+        return False
+
     def __lt__(self, other):  # self < other
         m_date_self = PTN_DATE.search(self.head.attrs["value"])
         m_date_other = PTN_DATE.search(other.head.attrs["value"])
@@ -173,18 +192,22 @@ class TimeContainer:
             # NOTE: based only on two TCs, perfect inference is not possible
             # see sort_tcs()'s latter processing
             for t_ent in self.t_ents:
-                # no need to check rels_from because it syncs to rels_to
                 for type_, ents in t_ent.rels_to.items():
                     if ents & other.t_ents:
                         if type_ in ["before", "end"]:
                             return True
                         elif type_ in ["after", "start"]:
                             return False
-
+            for t_ent in other.t_ents:
+                for type_, ents in t_ent.rels_to.items():
+                    if ents & self.t_ents:
+                        if type_ in ["before", "end"]:
+                            return False
+                        elif type_ in ["after", "start"]:
+                            return True
             # raise ValueError("Both TimeContainers in comparison must have head TIMEX3.")
             # FIXME: ad-hock operation for List[TC] sorting
             # list.sort() only uses __lt__()
-            # わからないものは全部同じとみなす
             return False
 
     def __le__(self, other):
@@ -269,10 +292,10 @@ def make_time_containers(entities: List[Entity]) -> List[TimeContainer]:
         # print("\n".join(["\t".join(row) for row in table]))
         # print()
 
-    sort_tcs(time_containers)
     time_containers = [tc for tc in time_containers if not is_isolate_tc(tc)]
+    sorted_tcs = sort_tcs(time_containers)
 
-    return time_containers
+    return sorted_tcs
 
 
 def is_isolate_tc(tc: TimeContainer) -> bool:
@@ -423,7 +446,7 @@ def merge_tcs(tcs: List[TimeContainer]) -> List[TimeContainer]:
         try:
             m = PTN_DATE.search(tc.head.attrs["value"])
         except:
-            print(tc.all_ents())
+            print(tc.all_ents(), file=sys.stderr)
             raise
         if m:
             datedic.setdefault(m.group(0), []).append(tc)
@@ -447,7 +470,7 @@ def merge_tcs(tcs: List[TimeContainer]) -> List[TimeContainer]:
     return new_tcs
 
 
-def sort_tcs(tcs: List[TimeContainer]) -> None:
+def sort_tcs(tcs: List[TimeContainer]) -> List[TimeContainer]:
     """Sort time containers.
 
     Assume normalised time values available.
@@ -460,12 +483,55 @@ def sort_tcs(tcs: List[TimeContainer]) -> None:
     # __lt__() based sorting is imperfect for empty value timex
     tcs.sort()
 
-    # TODO: resolve relative TC's position among absolute TCs
-    # relative_tcs = [tc for tc in tcs if not tc.head.attrs["value"]]
-    # absolute_tcs = [tc for tc in tcs if tc.head.attrs["value"]]
-    #
-    # for rtc in relative_tcs:
-    #     rtc.t_ents
+    # # TODO: resolve relative TC's position among absolute TCs
+    # Topological sort would solve this!
+    relative_tcs = [tc for tc in tcs if not tc.head.attrs["value"]]
+    absolute_tcs = [tc for tc in tcs if tc.head.attrs["value"]]
+    # rtcs_ix = [f"r{i}" for i in range(len(relative_tcs))]
+    atcs_ix = [f"a{i}" for i in range(len(absolute_tcs))]
+    g: Dict[str, Set[str]] = {}  # 後 ← 前 の時間関係グラフ
+    for ai, ai_ in zip(atcs_ix, atcs_ix[1:]):
+        if ai not in g:
+            g[ai] = set()
+        if ai_ not in g:
+            g[ai_] = set()
+        g[ai_] |= set([ai])
+        g[ai] |= set(
+            [
+                f"r{i}"
+                for i, tc in enumerate(relative_tcs)
+                if absolute_tcs[int(ai[1:])].rel_after(tc)
+            ]
+        )
+    for i, rtc in enumerate(relative_tcs):
+        if f"r{i}" not in g:
+            g[f"r{i}"] = set()
+        g[f"r{i}"] |= set(
+            [
+                f"r{j}"
+                for j, tc in enumerate(relative_tcs)
+                if i != j and rtc.rel_after(tc)
+            ]
+        )
+        g[f"r{i}"] |= set(
+            [
+                f"a{j}"
+                for j, tc in enumerate(absolute_tcs)
+                if i != j and rtc.rel_after(tc)
+            ]
+        )
+    try:
+        sorted_ix = toposort_flatten(g)
+        sorted_tcs = []
+        for ix in sorted_ix:
+            if ix[0] == "a":
+                sorted_tcs.append(absolute_tcs[int(ix[1:])])
+            elif ix[0] == "r":
+                sorted_tcs.append(relative_tcs[int(ix[1:])])
+        return sorted_tcs
+    except CircularDependencyError:
+        print("Error: Circular time relations detected.")
+        return tcs
 
 
 def relate_dct(doc: Document) -> None:
