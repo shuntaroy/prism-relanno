@@ -444,6 +444,8 @@ class Document:
             htmlclass = f"{BRAT2HTML[ent.tag]}-{ent.attrs['certainty']}"
         elif "state" in ent.attrs:
             htmlclass = f"{BRAT2HTML[ent.tag]}-{ent.attrs['state']}"
+        elif "type" in ent.attrs:
+            htmlclass = f"{BRAT2HTML[ent.tag]}-{ent.attrs['type']}"
         else:
             htmlclass = f"{BRAT2HTML[ent.tag]}"
 

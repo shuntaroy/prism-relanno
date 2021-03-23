@@ -1,6 +1,6 @@
 """Visualise time containers from annotation."""
 from collections import Counter
-from typing import List, Dict, Set, Optional, Iterable
+from typing import List, Dict, Set, Optional, Iterable, Tuple
 from datetime import datetime, timedelta
 import re
 import json
@@ -10,6 +10,8 @@ import fire
 from dateutil.relativedelta import relativedelta
 from normtime import normalize
 from toposort import toposort_flatten, CircularDependencyError
+
+# Python 3.9+ implements TopologicalSorter in graphlib
 
 from entity_types import Id, Document, Entity, Relation
 import visualise_rel as vr
@@ -25,7 +27,7 @@ PTN_DATE = re.compile(r"\d\d\d\d-\d\d-\d\d")
 PTN_MONTH = re.compile(r"\d\d\d\d-\d\d")
 PTN_YEAR = re.compile(r"\d\d\d\d")
 
-TREL_NOT_ON = set(["before", "after", "start", "end"])
+TREL_NOT_ON = set(["before", "after", "start", "finish"])
 
 
 def generate_dot(doc: Document) -> str:
@@ -166,11 +168,27 @@ class TimeContainer:
                 if ents & other.t_ents:
                     if type_ in ["after", "start"]:
                         return True
-        # self <-before- other | self <-end- other
+        # self <-before- other | self <-finish- other
         for t_ent in other.t_ents:
             for type_, ents in t_ent.rels_to.items():
                 if ents & self.t_ents:
-                    if type_ in ["before", "end"]:
+                    if type_ in ["before", "finish"]:
+                        return True
+        return False
+
+    def rel_before(self, other):
+        """Return True if `self` happened before `other`, accodring to time relations only."""
+        # self -before-> other | self -finish-> other
+        for t_ent in self.t_ents:
+            for type_, ents in t_ent.rels_to.items():
+                if ents & other.t_ents:
+                    if type_ in ["before", "finish"]:
+                        return True
+        # self <-after- other | self <-start- other
+        for t_ent in other.t_ents:
+            for type_, ents in t_ent.rels_to.items():
+                if ents & self.t_ents:
+                    if type_ in ["after", "start"]:
                         return True
         return False
 
@@ -194,14 +212,14 @@ class TimeContainer:
             for t_ent in self.t_ents:
                 for type_, ents in t_ent.rels_to.items():
                     if ents & other.t_ents:
-                        if type_ in ["before", "end"]:
+                        if type_ in ["before", "finish"]:
                             return True
                         elif type_ in ["after", "start"]:
                             return False
             for t_ent in other.t_ents:
                 for type_, ents in t_ent.rels_to.items():
                     if ents & self.t_ents:
-                        if type_ in ["before", "end"]:
+                        if type_ in ["before", "finish"]:
                             return False
                         elif type_ in ["after", "start"]:
                             return True
@@ -239,6 +257,18 @@ class TimeContainer:
         return other.__lt__(self)
 
 
+def _tc_debug_printer(section, tcs):
+    print(section, file=sys.stderr)
+    table: List[List[str]] = []
+    for container in tcs:
+        tlist = [container.splittable, container.head] + list(
+            container.t_ents - set([container.head])
+        )
+        table.append([repr(ent) for ent in tlist + list(container.b_ents)])
+    print("\n".join(["\t".join(row) for row in table]), file=sys.stderr)
+    print(file=sys.stderr)
+
+
 def make_time_containers(entities: List[Entity]) -> List[TimeContainer]:
     """
     time containers = timex clusters connected with 'on'
@@ -258,42 +288,20 @@ def make_time_containers(entities: List[Entity]) -> List[TimeContainer]:
         time_containers.append(tc)
         entities = [entity for entity in entities if entity not in tc.all_ents()]
 
-    # print("==BEFORE WHILE==")
-    # table: List[List[str]] = []
-    # for container in time_containers:
-    #     tlist = [container.splittable, container.head] + list(
-    #         container.t_ents - set([container.head])
-    #     )
-    #     table.append([repr(ent) for ent in tlist + list(container.b_ents)])
-    # print("\n".join(["\t".join(row) for row in table]))
-    # print()
+    # _tc_debug_printer("==BEFORE WHILE==", time_containers)
     time_containers = merge_tcs(time_containers)
-    # print("==FIRST MERGE==")
-    # table = []
-    # for container in time_containers:
-    #     tlist = [container.splittable, container.head] + list(
-    #         container.t_ents - set([container.head])
-    #     )
-    #     table.append([repr(ent) for ent in tlist + list(container.b_ents)])
-    # print("\n".join(["\t".join(row) for row in table]))
-    # print()
+    # _tc_debug_printer("==FIRST MERGE==", time_containers)
     while any([tc.splittable for tc in time_containers]):
-        # print("INTO WHILE...")
-        # print()
         time_containers = [tc_ for tc in time_containers for tc_ in split_tc(tc)]
         time_containers = merge_tcs(time_containers)
 
-        # table = []
-        # for container in time_containers:
-        #     tlist = [container.splittable, container.head] + list(
-        #         container.t_ents - set([container.head])
-        #     )
-        #     table.append([repr(ent) for ent in tlist + list(container.b_ents)])
-        # print("\n".join(["\t".join(row) for row in table]))
-        # print()
+        # _tc_debug_printer("==INSIDE WHILE==", time_containers)
 
+    # _tc_debug_printer("==AFTER WHILE==", time_containers)
     time_containers = [tc for tc in time_containers if not is_isolate_tc(tc)]
+    # _tc_debug_printer("==REMOVE ISOLATED==", time_containers)
     sorted_tcs = sort_tcs(time_containers)
+    # _tc_debug_printer("==SORTED==", sorted_tcs)
 
     return sorted_tcs
 
@@ -364,7 +372,7 @@ def split_tc(tc: TimeContainer) -> List[TimeContainer]:
                     dur_date_val = parse_duration_value(
                         dur.attrs["value"],
                         date=the_date,
-                        neg=type_ == "end",
+                        neg=type_ == "finish",
                     )
                     dur_date = Entity(
                         Id(dur.id + 10000), "TIMEX3", (-2, -1), dur_date_val
@@ -482,25 +490,38 @@ def sort_tcs(tcs: List[TimeContainer]) -> List[TimeContainer]:
 
     # __lt__() based sorting is imperfect for empty value timex
     tcs.sort()
+    # _tc_debug_printer("==SIMPLE SORT==", tcs)
 
-    # # TODO: resolve relative TC's position among absolute TCs
+    # resolve relative TC's position among absolute TCs
     # Topological sort would solve this!
     relative_tcs = [tc for tc in tcs if not tc.head.attrs["value"]]
     absolute_tcs = [tc for tc in tcs if tc.head.attrs["value"]]
     # rtcs_ix = [f"r{i}" for i in range(len(relative_tcs))]
     atcs_ix = [f"a{i}" for i in range(len(absolute_tcs))]
-    g: Dict[str, Set[str]] = {}  # 後 ← 前 の時間関係グラフ
-    for ai, ai_ in zip(atcs_ix, atcs_ix[1:]):
-        if ai not in g:
-            g[ai] = set()
-        if ai_ not in g:
-            g[ai_] = set()
-        g[ai_] |= set([ai])
-        g[ai] |= set(
+    g: Dict[str, Set[str]] = {ai: set() for ai in atcs_ix}  # 後 ← 前 の時間関係グラフ
+    if len(atcs_ix) > 1:
+        for ai, ai_ in zip(atcs_ix, atcs_ix[1:]):
+            g[ai_] |= set([ai])
+            g[ai] |= set(
+                [
+                    f"r{i}"
+                    for i, tc in enumerate(relative_tcs)
+                    if absolute_tcs[int(ai[1:])].rel_after(tc)
+                ]
+            )
+            g[ai_] |= set(
+                [
+                    f"r{i}"
+                    for i, tc in enumerate(relative_tcs)
+                    if absolute_tcs[int(ai_[1:])].rel_after(tc)
+                ]
+            )
+    elif len(atcs_ix) == 1:
+        g["a0"] |= set(
             [
                 f"r{i}"
                 for i, tc in enumerate(relative_tcs)
-                if absolute_tcs[int(ai[1:])].rel_after(tc)
+                if absolute_tcs[0].rel_after(tc)
             ]
         )
     for i, rtc in enumerate(relative_tcs):
@@ -514,14 +535,12 @@ def sort_tcs(tcs: List[TimeContainer]) -> List[TimeContainer]:
             ]
         )
         g[f"r{i}"] |= set(
-            [
-                f"a{j}"
-                for j, tc in enumerate(absolute_tcs)
-                if i != j and rtc.rel_after(tc)
-            ]
+            [f"a{j}" for j, tc in enumerate(absolute_tcs) if rtc.rel_after(tc)]
         )
     try:
+        # print(g, file=sys.stderr)
         sorted_ix = toposort_flatten(g)
+        # print(sorted_ix, file=sys.stderr)
         sorted_tcs = []
         for ix in sorted_ix:
             if ix[0] == "a":
@@ -530,7 +549,7 @@ def sort_tcs(tcs: List[TimeContainer]) -> List[TimeContainer]:
                 sorted_tcs.append(relative_tcs[int(ix[1:])])
         return sorted_tcs
     except CircularDependencyError:
-        print("Error: Circular time relations detected.")
+        print("WARNING: Circular time relations detected.", file=sys.stderr)
         return tcs
 
 
@@ -657,9 +676,9 @@ def infer_timespan(e, tcs, on_a_tc=None):
     if not (set(e.rels_to.keys()) & set(Relation.time_rels)):
         return []
 
-    if "start" in e.rels_to and "end" in e.rels_to:
+    if "start" in e.rels_to and "finish" in e.rels_to:
         start_id = find_head_id(list(e.rels_to["start"])[0].id, tcs)
-        end_id = find_head_id(list(e.rels_to["end"])[0].id, tcs)
+        end_id = find_head_id(list(e.rels_to["finish"])[0].id, tcs)
         if is_earlier(start_id, end_id, tcs):
             return [start_id, end_id]
 
@@ -680,9 +699,9 @@ def infer_timespan(e, tcs, on_a_tc=None):
             # assume "start" is reliable
             return [start_id, tcs[-1].head.id]
 
-    elif "end" in e.rels_to and "after" in e.rels_to:
+    elif "finish" in e.rels_to and "after" in e.rels_to:
         after_id = find_head_id(list(e.rels_to["after"])[0].id, tcs)
-        end_id = find_head_id(list(e.rels_to["end"])[0].id, tcs)
+        end_id = find_head_id(list(e.rels_to["finish"])[0].id, tcs)
         if is_earlier(after_id, end_id, tcs):
             return [after_id, end_id]
         elif on_a_tc:
@@ -700,8 +719,8 @@ def infer_timespan(e, tcs, on_a_tc=None):
         else:
             return [start_id, tcs[-1].head.id]
 
-    elif "end" in e.rels_to:
-        end_id = find_head_id(list(e.rels_to["end"])[0].id, tcs)
+    elif "finish" in e.rels_to:
+        end_id = find_head_id(list(e.rels_to["finish"])[0].id, tcs)
         if on_a_tc and is_earlier(on_a_tc.head.id, end_id, tcs):
             return [on_a_tc.head.id, end_id]
         else:
@@ -834,7 +853,7 @@ def trace_region(embeded, e_ids):
     return e_ids
 
 
-def main(filename_r: str, dct: str, debug: bool = False, dot: bool = False) -> None:
+def main(filename_r, dct, debug=False, dot=False, repl=False):
     doc = Document(filename_r)
     relate_dct(doc)
     normalise_all_timex(doc, dct)
@@ -856,6 +875,9 @@ def main(filename_r: str, dct: str, debug: bool = False, dot: bool = False) -> N
             print(generate_dot(doc))
         else:
             print(to_json(containers, doc))
+
+    if repl:
+        return (doc, containers)
 
 
 if __name__ == "__main__":
