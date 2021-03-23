@@ -582,6 +582,26 @@ def normalise_all_timex(doc: Document, dct: str) -> None:
             # the return of `normalize` follows TimeL's 'value' spec
 
 
+def toposort_region_value(ents):
+    g: Dict[Id, Set[Id]] = {ent.id: set() for ent in ents}
+    for ent in ents:
+        if "region" in ent.rels_from:
+            g[ent.id] |= {reg.id for reg in ent.rels_from["region"]}
+        if "value" in ent.rels_from:
+            g[ent.id] |= {val.id for val in ent.rels_from["value"]}
+    try:
+        sorted_ids = toposort_flatten(g)
+    except CircularDependencyError:
+        print("WARNING: Circular basic relations detected.", file=sys.stderr)
+        return ents
+    sorted_ents = []
+    for sorted_id in sorted_ids:
+        search = [ent for ent in ents if ent.id == sorted_id]
+        if search:
+            sorted_ents.append(search[0])
+    return sorted_ents
+
+
 def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = True) -> str:
     times = []
     entities = []
@@ -605,17 +625,15 @@ def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = True) -> st
         embeded_ids.extend([t.id for t in tc.t_ents])
 
         # embed contained entities
-        for b in tc.b_ents:
+        bents = toposort_region_value(tc.b_ents)
+        # for b in tc.b_ents:
+        while bents:
+            b = bents.pop(0)
+            if b.id in embeded_ids:
+                continue
             if b.tag in ["Change", "Feature"]:
                 continue
-            elif "value" in b.rels_from:
-                # valueはkeyからたどるので取らない
-                # TODO: 孤立value?
-                continue
             ent = embed_entity(b, tcs, embeded_ids, on_a_tc=tc)
-            if "anatomy" in ent:
-                # 入れ子regionの親だけとる
-                anatomy_ids.append(ent["anatomy"])
             entities.append(ent)
 
     # print(json.dumps(entities, ensure_ascii=False, indent=2))
@@ -635,16 +653,19 @@ def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = True) -> st
     garbage_ = []
     for doe in doc.entities:
         if doe.id not in embeded_ids:
-            # TCに入っておらず，start/end/after/beforeだけついてるentの取り扱い
-            ts = infer_timespan(doe, tcs)
-            if ts:
-                # FIXME: Disease ← anatomy, feature, ...
-                rest_ent = embed_an_entity(doe)
-                rest_ent["time"] = ts
-                entities.append(rest_ent)
-            else:
-                # どこにも入ってないものをgarbageにいれる
+            if doe.tag in ["Change", "Feature"]:
                 garbage_.append(embed_garbage(doe))
+            else:
+                # TCに入っておらず，start/end/after/beforeだけついてるentの取り扱い
+                ts = infer_timespan(doe, tcs)
+                if ts:
+                    # FIXME: Disease ← anatomy, feature, ...
+                    rest_ent = embed_entity(doe, tcs, embeded_ids)
+                    rest_ent["time"] = ts
+                    entities.append(rest_ent)
+                else:
+                    # どこにも入ってないものをgarbageにいれる
+                    garbage_.append(embed_garbage(doe))
 
     ret = {
         "entities": entities,
@@ -748,12 +769,57 @@ def infer_timespan(e, tcs, on_a_tc=None):
         return [on_id, on_id]
 
 
-def embed_an_entity(e):
+def embed_anatomy(a, embeded_ids):
+    anat = {"id": a.id, "text": a.text, "feature": [], "contain": []}
+    embeded_ids.append(a.id)
+
+    anat["feature"] = embed_feature(a, embeded_ids)
+    if "change" in a.rels_from:
+        # TODO: how to deal with compare_to?
+        anat["change"] = [{"text": cha.text} for cha in a.rels_from["change"]]
+        embeded_ids.extend([cha.id for cha in a.rels_from["change"]])
+
+    if "region" in a.rels_to:
+        anat["contain"] = [
+            reg.id for reg in a.rels_to["region"] if reg.tag == "Anatomical"
+        ]
+
+    return anat
+
+
+def embed_feature(e, embeded_ids):
+    if "feature" in e.rels_from:
+        embeded_ids.extend([f.id for f in e.rels_from["feature"]])
+        return [f.text for f in e.rels_from["feature"]]
+    else:
+        return []
+
+
+def embed_change(e, embeded_ids, tcs):
+    changes = []
+    if "change" in e.rels_from:
+        for cha in e.rels_from["change"]:
+            if "compare" in cha.rels_to:
+                # compare先は1個だけのはず…
+                comp_to = list(cha.rels_to["compare"])[0]
+                if comp_to.tag != "TIMEX3":
+                    # FIXME: How to visualise non-time comparison?
+                    continue
+                comp_to_time = find_head_id(comp_to.id, tcs)
+                changes.append({"text": cha.text, "compare": comp_to_time})
+            else:
+                changes.append({"text": cha.text})
+            embeded_ids.append(cha.id)
+    return changes
+
+
+def embed_entity_init(e, embeded_ids):
     ent = {
         "id": e.id,
         "tag": e.tag,
         "text": e.text,
         "change": [],
+        "feature": [],
         "region": {},
         "value": [],
     }
@@ -762,55 +828,49 @@ def embed_an_entity(e):
     elif "state" in e.attrs:
         ent["state"] = e.attrs["state"]
 
+    embeded_ids.append(e.id)
     return ent
 
 
-def embed_anatomy(a, embeded_ids):
-    anat = {"id": a.id, "text": a.text, "feature": [], "contain": []}
-    embeded_ids.append(a.id)
+def embed_entity(e, tcs, embeded_ids, on_a_tc=None, anat=None):
+    # Assume topologically sorted by region and value
 
-    if "feature" in a.rels_from:
-        anat["feature"] = [f.text for f in a.rels_from["feature"]]
-        embeded_ids.extend([f.id for f in a.rels_from["feature"]])
-
-    if "region" in a.rels_to:
-        anat["contain"] = [
-            reg.id for reg in a.rels_to["region"] if reg.tag == "Anatomical"
-        ]
-
-    # TODO: if "change" in a.rels_from:
-
-    return anat
-
-
-def embed_entity(e, tcs, embeded_ids, anat=None, on_a_tc=None):
-    ent = embed_an_entity(e)
-    embeded_ids.append(e.id)
-
-    ent["time"] = infer_timespan(e, tcs, on_a_tc=on_a_tc)
-
-    if "feature" in e.rels_from:
-        ent["feature"] = [f.text for f in e.rels_from["feature"]]
-        embeded_ids.extend([f.id for f in e.rels_from["feature"]])
-    else:
-        ent["feature"] = []
+    ent = embed_entity_init(e, embeded_ids)
+    # even if recursive call holds e.tag == "Anatomical", still embed it as `entity`
 
     if anat:
         ent["anatomy"] = anat
     elif "region" in e.rels_from:
         parent = [reg for reg in e.rels_from["region"] if reg.tag == "Anatomical"]
         if parent:
-            # FIXME: 複数部位に属する可��性はあるが無視
+            # FIXME: 複数部位に属する可能性はあるが無視
             ent["anatomy"] = parent.pop().id
+
+    ent["time"] = infer_timespan(e, tcs, on_a_tc=on_a_tc)
+
+    ent["feature"] = embed_feature(e, embeded_ids)
+
+    ent["change"] = embed_change(e, embeded_ids, tcs)
+    comp_tos = [comp_to["compare"] for comp_to in ent["change"] if "compare" in comp_to]
+    if comp_tos:
+        tcids = [tc.head.id for tc in tcs]
+        # take the earliest changeRef-ed time
+        ent["time"][0] = [tcid for tcid in tcids if tcid in comp_tos][0]
+
+    if "value" in e.rels_to:
+        for val in e.rels_to["value"]:
+            ent["value"].append(embed_entity(val, tcs, embeded_ids, on_a_tc=on_a_tc))
 
     if "region" in e.rels_to:
         for reg in e.rels_to["region"]:
             if "region" in reg.rels_to:
                 # E.g. e = "腫瘤", reg = "内部", reg.rels_to["region"] = ["すりガラス影", ...]
+                # TODO: reg自身に付与されたfeatureやchangeを表現できない
                 ent["region"][reg.text] = [
                     embed_entity(contained, tcs, embeded_ids, anat=ent.get("anatomy"))
                     for contained in reg.rels_to["region"]
                 ]
+                embeded_ids.append(reg.id)
             else:
                 if reg.tag == "Disease":
                     # E.g. e = "腫瘤", reg = "充実部分" => {"充実部分": {<d>充実部分</d>}} (redundant, though)
@@ -819,29 +879,12 @@ def embed_entity(e, tcs, embeded_ids, anat=None, on_a_tc=None):
                     ]
                 elif reg.tag == "Anatomical":
                     # TODO: ill-defined case
-                    # E.g. 腫瘤の内部は著編ありません
+                    # E.g. 腫瘤の内部は著変ありません
                     ent["region"][reg.text] = [embed_anatomy(reg, embeded_ids)]
 
-    if "change" in e.rels_from:
-        for cha in e.rels_from["change"]:
-            if "compare" in cha.rels_to:
-                # FIXME: compareを持たないものは無視する
-                # compare先は1個だけのはず…
-                comp_to = list(cha.rels_to["compare"])[0]
-                if comp_to.tag != "TIMEX3":
-                    # FIXME: How to visualise non-time comparison?
-                    continue
-                comp_to_time = find_head_id(comp_to.id, tcs)
-                ent["change"].append({"text": cha.text, "compare": comp_to_time})
-                embeded_ids.append(cha.id)
-                ent["time"][0] = comp_to_time  # FIXME: compareは前の時点だけ…のはず
-
-    if "value" in e.rels_to:
-        for val in e.rels_to["value"]:
-            ent["value"].append(embed_an_entity(val))
-            embeded_ids.append(val.id)
-
     return ent
+
+
 def embed_garbage(e):
     return {
         "id": e.id,
