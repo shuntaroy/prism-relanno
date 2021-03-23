@@ -585,11 +585,11 @@ def normalise_all_timex(doc: Document, dct: str) -> None:
 def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = True) -> str:
     times = []
     entities = []
-    anatomy_ids = []
     embeded_ids = []
 
-    # time and entities
+    # embed head-timex and contained entities
     for tc in tcs:
+        # embed head-timex
         if PTN_DATE.match(tc.head.attrs["value"]):
             date_val = tc.head.attrs["value"]
         else:
@@ -603,6 +603,8 @@ def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = True) -> st
             }
         )
         embeded_ids.extend([t.id for t in tc.t_ents])
+
+        # embed contained entities
         for b in tc.b_ents:
             if b.tag in ["Change", "Feature"]:
                 continue
@@ -626,10 +628,7 @@ def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = True) -> st
     # FIXME: all anotomy, anyway
     # TODO: anatomy包含関係 knowledge-based
     root_anatomicals = [
-        # e for e in doc.entities if e.id in anatomy_ids and e.id not in set(embeded_ids)
-        e
-        for e in doc.entities
-        if e.tag in "Anatomical" and e.id not in set(embeded_ids)
+        e for e in doc.entities if e.tag in "Anatomical" and e.id not in embeded_ids
     ]
     anatomy = [embed_anatomy(a, embeded_ids) for a in root_anatomicals]
 
@@ -639,12 +638,13 @@ def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = True) -> st
             # TCに入っておらず，start/end/after/beforeだけついてるentの取り扱い
             ts = infer_timespan(doe, tcs)
             if ts:
+                # FIXME: Disease ← anatomy, feature, ...
                 rest_ent = embed_an_entity(doe)
                 rest_ent["time"] = ts
                 entities.append(rest_ent)
             else:
                 # どこにも入ってないものをgarbageにいれる
-                garbage_.append(embed_an_entity(doe))
+                garbage_.append(embed_garbage(doe))
 
     ret = {
         "entities": entities,
@@ -842,6 +842,20 @@ def embed_entity(e, tcs, embeded_ids, anat=None, on_a_tc=None):
             embeded_ids.append(val.id)
 
     return ent
+def embed_garbage(e):
+    return {
+        "id": e.id,
+        "tag": e.tag,
+        "text": e.text,
+        "rels_to": {
+            type_: [(relto.id, relto.tag, relto.text) for relto in reltos]
+            for type_, reltos in e.rels_to.items()
+        },
+        "rels_from": {
+            type_: [(relfr.id, relfr.tag, relfr.text) for relfr in relfrs]
+            for type_, relfrs in e.rels_from.items()
+        },
+    }
 
 
 def trace_region(embeded, e_ids):
