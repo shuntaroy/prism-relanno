@@ -1,7 +1,8 @@
-from pathlib import Path
 import xml.etree.ElementTree as ET
-import pandas as pd
+from pathlib import Path
+
 import fire
+import pandas as pd
 from tqdm import tqdm
 
 # pd.set_option("display.max_colwidth", None)
@@ -16,7 +17,7 @@ TAGNAMES = {
     "a": "Anatomical",
     "f": "Feature",
     "c": "Change",
-    "TIMEX3": "TIMEX3",
+    "timex3": "TIMEX3",
     "t-test": "TestTest",
     "t-key": "TestKey",
     "t-val": "TestVal",
@@ -83,9 +84,9 @@ def row_to_tagstr(row):
         fend_pos = row.start_pos + n_pos
         sstart_pos = fend_pos + 1
         text_ = row.text.replace("\n", " ")
-        return f"T{row.name}\t{TAGNAMES[row.tag]} {row.start_pos} {fend_pos};{sstart_pos} {row.end_pos}\t{text_}"
+        return f"T{row.name}\t{TAGNAMES[row.tag.lower()]} {row.start_pos} {fend_pos};{sstart_pos} {row.end_pos}\t{text_}"
     else:
-        return f"T{row.name}\t{TAGNAMES[row.tag]} {row.start_pos} {row.end_pos}\t{row.text}"
+        return f"T{row.name}\t{TAGNAMES[row.tag.lower()]} {row.start_pos} {row.end_pos}\t{row.text}"
 
 
 def df_to_tagstrs(df):
@@ -120,7 +121,7 @@ def get_first_child(elem):
 
 def get_real_root(elem):
     child = get_first_child(elem)
-    if child.tag not in TAGNAMES.keys():
+    if child.tag.lower() not in TAGNAMES.keys():
         return get_real_root(child)
     else:
         return elem
