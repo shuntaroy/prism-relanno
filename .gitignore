@@ -146,3 +146,5 @@ timex_modules/
 *.png
 *.pdf
 results/
+
+_*/
