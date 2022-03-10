@@ -148,3 +148,5 @@ timex_modules/
 results/
 
 _*/
+_*
+data/

@@ -5,9 +5,9 @@ description = "Relation data handler for PRISM annotation"
 authors = ["Shuntaro Yada <contact@shuntaroy.com>"]
 
 [tool.poetry.dependencies]
-python = ">= 3.7, < 3.9"
+python = ">= 3.7"
 fire = "^0.3.1"
-normtime = { git = "https://github.com/ku-nlp/normtime.git", develop = true}
+normtime = { git = "https://github.com/ku-nlp/normtime.git", develop = true }
 # normtime = { path = "./normtime/", develop = true }
 python-dateutil = "^2.8.1"
 pandas = "^1.1.5"
@@ -19,7 +19,7 @@ mypy = "^0.782"
 pytest = "^6.1.1"
 ipython = "^7.21.0"
 pylint = "^2.11.1"
-black = {version = "^21.9b0", allow-prereleases = true}
+black = { version = "^21.9b0", allow-prereleases = true }
 ipykernel = "^6.4.1"
 
 [build-system]
