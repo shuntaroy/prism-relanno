@@ -1,10 +1,11 @@
 """Classes for brat annotation entities and a whole document."""
 from __future__ import annotations
-import sys
-from typing import List, Dict, Tuple, NewType, TypeVar, Set
-from pathlib import Path
-from xml.sax import xmlreader, saxutils
+
 import io
+import sys
+from pathlib import Path
+from typing import Dict, List, NewType, Set, Tuple, TypeVar
+from xml.sax import saxutils, xmlreader
 
 Id = NewType("Id", int)
 A = TypeVar("A")
@@ -104,6 +105,8 @@ class Attribute:
 
 class Other:
     """Struct for other ann lines"""
+
+    # TODO: Comment に改行が含まれると行頭が brat フォーマットに従わない！
 
     def __init__(self, *cols: str):
         self.cols = cols
