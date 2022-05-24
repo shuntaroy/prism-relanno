@@ -4,8 +4,8 @@ import json
 import re
 import sys
 from collections import Counter
-from datetime import datetime, timedelta
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from datetime import date, datetime, timedelta
+from typing import Dict, Iterable, List, Optional, Set, Union
 
 import fire
 from dateutil.relativedelta import relativedelta
@@ -659,7 +659,9 @@ def toposort_region_value(ents: Iterable[Entity]) -> List[Entity]:
     return sorted_ents
 
 
-def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = True) -> str:
+def to_json(
+    tcs: List[TimeContainer], doc: Document, garbage: bool = True, obj=False
+) -> Union[str, dict]:
     """Convert time containers to JSON.
 
     Args:
@@ -667,9 +669,11 @@ def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = True) -> st
         doc (Document): a document to process
         garbage (bool, optional): set True if garbage entities needed in the output.
                                     Defaults to True.
+        obj (bool, optional): set True to get a Dict object.
 
     Returns:
         str: JSON string
+        dict: a JSON (dict) object if `obj`=True
     """
     times = []
     entities = []
@@ -744,7 +748,7 @@ def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = True) -> st
     if garbage:
         ret["garbage"] = garbage_
 
-    return json.dumps(ret, ensure_ascii=False, indent=2)
+    return ret if obj else json.dumps(ret, ensure_ascii=False, indent=2)
 
 
 def find_head_id(id_: Id, tcs: List[TimeContainer]) -> Id:
@@ -996,6 +1000,16 @@ def trace_region(embeded, e_ids):
         while containeds:
             e_ids = trace_region(containeds.pop(), e_ids)
     return e_ids
+
+
+def main_lib(doc, dct=None):
+    """MAIN for being called from library."""
+    relate_dct(doc)
+    if not dct:
+        dct = date.today().isoformat()
+    normalise_all_timex(doc, dct)
+    containers = make_time_containers([e for e in doc.entities if e.tag == "TIMEX3"])
+    return to_json(containers, doc, obj=True)
 
 
 def main(filename_r, dct, debug=False, dot=False, repl=False):

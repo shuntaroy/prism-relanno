@@ -8,8 +8,7 @@ import shutil
 
 import fire
 
-from entity_types import Id, Document
-
+from entity_types import Document, Id
 
 # def debug_print(*obj):
 #     print(*obj)
@@ -80,6 +79,12 @@ def recover_value(doc: Document) -> None:
         if i_is_key and j_is_val:
             doc.add_relation("value", doc.entities[i].id, doc.entities[j].id)
     # doc.update_doc()
+
+
+def recover_all(doc: Document) -> None:
+    """Recover all specs."""
+    recover_on(doc)
+    recover_value(doc)
 
 
 def main(

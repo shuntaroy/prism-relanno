@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Dict, List, NewType, Optional, Set, Tuple, TypeVar
 from xml.sax import saxutils, xmlreader
 
+import xml2brat as x2b
+
 Id = NewType("Id", int)
 A = TypeVar("A")
 
@@ -71,7 +73,7 @@ class Relation:
         )
 
     def __repr__(self):
-        return f"<R{self.id} {self.name} {self.arg1}->{self.arg2}>"
+        return f"<R{self.id} {self.name} T{self.arg1} -> T{self.arg2}>"
 
     def __str__(self):
         return f"R{self.id}\t{self.name} Arg1:T{self.arg1} Arg2:T{self.arg2}"
@@ -119,25 +121,25 @@ class Attribute:
         return all([_name, _target, _value])
 
 
-class Other:
-    """Struct for other ann lines"""
+# class Other:
+#     """Struct for other ann lines"""
 
-    # TODO: Comment に改行が含まれると行頭が brat フォーマットに従わない！
+#     # TODO: Comment に改行が含まれると行頭が brat フォーマットに従わない！
 
-    def __init__(self, *cols: str):
-        self.cols = cols
-        self.id = Id(int(cols[0][1:]))
+#     def __init__(self, *cols: str):
+#         self.cols = cols
+#         self.id = Id(int(cols[0][1:]))
 
-    @classmethod
-    def from_raw(cls, raw_line: str) -> Other:
-        cols = raw_line.split("\t")
-        return cls(*cols)
+#     @classmethod
+#     def from_raw(cls, raw_line: str) -> Other:
+#         cols = raw_line.split("\t")
+#         return cls(*cols)
 
-    def __repr__(self):
-        return f"<{self.cols}>"
+#     def __repr__(self):
+#         return f"<{self.cols}>"
 
-    def __str__(self):
-        return "\t".join(self.cols)
+#     def __str__(self):
+#         return "\t".join(self.cols)
 
 
 class Entity:
@@ -162,7 +164,7 @@ class Entity:
         self.rels_to: Dict[str, Set[Entity]] = {}
         self.rels_from: Dict[str, Set[Entity]] = {}
 
-        self.others: List[Other] = []
+        # self.others: List[Other] = []
 
         self.parent_doc = doc
 
@@ -241,9 +243,9 @@ class Entity:
         self.rels_from.setdefault(reltype, set()).add(entity)
         self.parent_doc.update_needed = True
 
-    def set_other(self, other: Other) -> None:
-        self.others.append(other)
-        self.parent_doc.update_needed = True
+    # def set_other(self, other: Other) -> None:
+    #     self.others.append(other)
+    #     self.parent_doc.update_needed = True
 
 
 class Document:
@@ -268,31 +270,13 @@ class Document:
         else:
             root = ET.fromstring(f"<root>{fname_or_xmlstr}</root>")
         doc = Document()
-        a_id = 1
-        for elem in root.iter():
-            tag = elem.tag.lower()
-            if tag in XML2BRAT:
-                id_ = int(elem.attrib["tid"][1:])
-                doc.entities.append(
-                    Entity(Id(id_), XML2BRAT[tag], (id_, id_), elem.text)
-                )
-                for attrkey in ["certainty", "type", "state", "DCT-Rel"]:
-                    if attrkey in elem.attrib:
-                        doc.attributes.append(
-                            Attribute(a_id, attrkey, id_, elem.attrib[attrkey])
-                        )
-                        a_id += 1
-            if elem.tag.lower() == "brel":
-                r_id = int(elem.attrib["rid"][1:])
-                doc.relations.append(
-                    Relation(
-                        r_id,
-                        elem.attrib["reltype"],
-                        Id(int(elem.attrib["arg1"][1:])),
-                        Id(int(elem.attrib["arg2"][1:])),
-                    )
-                )
-
+        doc.txt = x2b.get_plain_text(root)
+        df, df_r = x2b.root_to_df(root, doc.txt)
+        tagstrs = x2b.df_to_tagstrs(df)
+        attrstrs = x2b.df_to_attrstrs(df)
+        relstrs = x2b.df_to_relstrs(df_r)
+        for annline in tagstrs + attrstrs + relstrs:
+            doc._read_ann_line(annline)
         doc._build_doc()
         return doc
 
@@ -300,13 +284,13 @@ class Document:
         self.entities: List[Entity] = []
         self.attributes: List[Attribute] = []
         self.relations: List[Relation] = []
-        self.others: List[Other] = []
+        # self.others: List[Other] = []
 
         # store maximum IDs
         self.ent_id_max = 0
         self.attr_id_max = 0
         self.rel_id_max = 0
-        self.other_id_max = 0
+        # self.other_id_max = 0
 
         # states
         self.isbuilt = False  # True == initialised
@@ -335,8 +319,8 @@ class Document:
             self.attributes.append(Attribute.from_raw(line))
         elif line.startswith("R"):
             self.relations.append(Relation.from_raw(line))
-        else:
-            self.others.append(Other.from_raw(line))
+        # else:
+        #     self.others.append(Other.from_raw(line))
 
     def _build_doc(self):
         """Update entities with attributes and relations."""
@@ -358,10 +342,10 @@ class Document:
             e1.set_relation_to(rel.name, e2)
             e2.set_relation_from(rel.name, e1)
 
-        for other in self.others:
-            self.other_id_max = max(self.other_id_max, other.id)
-            e = self.findby_id(rel.arg1)
-            e.set_other(other)
+        # for other in self.others:
+        #     self.other_id_max = max(self.other_id_max, other.id)
+        #     e = self.findby_id(other.arg)
+        #     e.set_other(other)
 
         self.isbuilt = True
         self.update_needed = False
@@ -459,7 +443,7 @@ class Document:
             self.entities,
             self.relations,
             self.attributes,
-            self.others,
+            # self.others,
         ]
         for anno in annotations:
             for a in anno:
@@ -495,8 +479,8 @@ class Document:
             xmldoc.endElement("span")
             cursor = ent.span[1]
 
-        if cursor < len(self.txt) - 1:
-            xmldoc.characters(self.txt[cursor:-1])
+        if cursor <= len(self.txt) - 1:
+            xmldoc.characters(self.txt[cursor:])
 
         xmldoc.endElement("div")  # => </body>
         # xmldoc.endDocument()  # => kinda .close()

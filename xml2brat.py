@@ -43,15 +43,17 @@ def get_plain_text(root):
 
 def root_to_df(root, plain_text):
     """Convert an XML object to Table."""
-    csr = 0
     data = []
-    root.text = root.text.lstrip()
+    data_r = []
+    # NOTE: assume that non-PRISM tags don't appear between <root>...<[first PRISM tag]>
+    root.text = root.text.lstrip() if root.text else None
     root.tail = None
+    csr = len(root.text) if root.text else 0
     for e in root.iter():
-        st, ed = csr, csr + len(e.text) if e.text else csr
-        orig_snip = plain_text[st:ed]
-        data.append(
-            [
+        if e.tag.lower() in TAGNAMES:
+            st, ed = csr, csr + len(e.text) if e.text else csr
+            orig_snip = plain_text[st:ed]
+            tag_datum = [
                 e.tag,
                 e.attrib,
                 e.text,
@@ -61,34 +63,52 @@ def root_to_df(root, plain_text):
                 repr(orig_snip),
                 e.text == orig_snip,
             ]
-        )
-        csr += len_null(e.text) + len_null(e.tail)
-    df = pd.DataFrame(
-        data,
-        columns=[
-            "tag",
-            "attrib",
-            "text",
-            "tail",
-            "start_pos",
-            "end_pos",
-            "orig",
-            "matchOrig",
-        ],
-    )
-    assert df.iloc[1:]["matchOrig"].all(), "\n" + str(df)
-    return df.iloc[1:]
+            if "tid" in e.attrib:
+                tag_datum.insert(0, int(e.attrib["tid"][1:]))
+                del e.attrib["tid"]
+            data.append(tag_datum)
+            csr += len_null(e.text) + len_null(e.tail)
+        if e.tag == "brel":
+            data_r.append(
+                [
+                    int(e.attrib["rid"][1:]),
+                    e.attrib["reltype"],
+                    int(e.attrib["arg1"][1:]),
+                    int(e.attrib["arg2"][1:]),
+                ]
+            )
+        # else:
+        #     # some unknown tags exist
+        #     # TODO: to make this procedure robust
+    header = [
+        "tag",
+        "attrib",
+        "text",
+        "tail",
+        "start_pos",
+        "end_pos",
+        "orig",
+        "matchOrig",
+    ]
+    if len(header) + 1 == len(data[0]):
+        header.insert(0, "tid")
+    df = pd.DataFrame(data, columns=header)
+    assert df["matchOrig"].all(), "\n" + str(df)
+    header_r = ["rid", "reltype", "arg1", "arg2"]
+    df_r = pd.DataFrame(data_r, columns=header_r)
+    return df, df_r
 
 
 def row_to_tagstr(row):
     """Convert a Table row to ANN's Tag format"""
+    id_ = row.tid if "tid" in row else row.name
     if "\n" not in row.text:  # assume #\n == 1 (more than that is illegal)
-        return f"T{row.name}\t{TAGNAMES[row.tag.lower()]} {row.start_pos} {row.end_pos}\t{row.text}"
+        return f"T{id_}\t{TAGNAMES[row.tag.lower()]} {row.start_pos} {row.end_pos}\t{row.text}"
     n_pos = row.text.find("\n")
     fend_pos = row.start_pos + n_pos
     sstart_pos = fend_pos + 1
     text_ = row.text.replace("\n", " ")
-    return f"T{row.name}\t{TAGNAMES[row.tag.lower()]} {row.start_pos} {fend_pos};{sstart_pos} {row.end_pos}\t{text_}"
+    return f"T{id_}\t{TAGNAMES[row.tag.lower()]} {row.start_pos} {fend_pos};{sstart_pos} {row.end_pos}\t{text_}"
 
 
 def df_to_tagstrs(df):
@@ -101,8 +121,9 @@ def df_to_tagstrs(df):
 
 def row_to_attrstr(row):
     """Convert a Table row to ANN's Attribute format"""
+    id_ = row.tid if "tid" in row else row["index"]
     key, val = list(row.attrib.items())[0]
-    return f"A{row.name + 1}\t{key} T{row['index']} {val}"
+    return f"A{row.name + 1}\t{key} T{id_} {val}"
 
 
 def df_to_attrstrs(df):
@@ -116,6 +137,16 @@ def df_to_attrstrs(df):
         )
         .to_list()
     )
+
+
+def row_to_relstr(row):
+    """Convert a Table row to ANN's Relation format"""
+    return f"R{row.rid}\t{row.reltype} Arg1:T{row.arg1} Arg2:T{row.arg2}"
+
+
+def df_to_relstrs(df_r):
+    """Convert all relations to ANN-formatted strings."""
+    return df_r.apply(row_to_relstr, axis=1).to_list()
 
 
 def get_first_child(elem):
@@ -162,7 +193,7 @@ def main(dirpath, output_path, trav=False):
                     raise e
             plain_text = get_plain_text(root)
             try:
-                df = root_to_df(root, plain_text)
+                df, df_r = root_to_df(root, plain_text)
             except AssertionError as e:
                 print()
                 print()
@@ -170,8 +201,9 @@ def main(dirpath, output_path, trav=False):
                 raise e
             tagstrs = df_to_tagstrs(df)
             attrstrs = df_to_attrstrs(df)
+            relstrs = df_to_relstrs(df_r)
             with open(outp / i.with_suffix(".ann").name, "w") as outf:
-                outf.write("\n".join(tagstrs + attrstrs))
+                outf.write("\n".join(tagstrs + attrstrs + relstrs))
             with open(outp / i.with_suffix(".txt").name, "w") as outf:
                 outf.write(plain_text)
         if i.is_dir() and trav:
