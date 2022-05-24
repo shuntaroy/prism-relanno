@@ -1,21 +1,23 @@
 """Visualise time containers from annotation."""
-from collections import Counter
-from typing import List, Dict, Set, Optional, Iterable, Tuple
-from datetime import datetime, timedelta
-import re
+
 import json
+import re
 import sys
+from collections import Counter
+from datetime import datetime, timedelta
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import fire
 from dateutil.relativedelta import relativedelta
 from normtime import normalize
-from toposort import toposort_flatten, CircularDependencyError
+from toposort import CircularDependencyError, toposort_flatten
+
+import visualise_rel as vr
+from entity_types import Document, Entity, Id, Relation
+from visualise_rel import CLR, DOTHEAD
 
 # Python 3.9+ implements TopologicalSorter in graphlib
 
-from entity_types import Id, Document, Entity, Relation
-import visualise_rel as vr
-from visualise_rel import CLR, DOTHEAD
 
 # TODO: merge visualise_rel.py with this code
 
@@ -27,7 +29,7 @@ PTN_DATE = re.compile(r"\d\d\d\d-\d\d-\d\d")
 PTN_MONTH = re.compile(r"\d\d\d\d-\d\d")
 PTN_YEAR = re.compile(r"\d\d\d\d")
 
-TREL_NOT_ON = set(["before", "after", "start", "finish"])
+TREL_NOT_ON = {"before", "after", "start", "finish"}
 
 
 def generate_dot(doc: Document) -> str:
@@ -66,7 +68,7 @@ def generate_dot(doc: Document) -> str:
 
     for ix, container in enumerate(containers):
         # TODO: 全部をrank=sameのsubgraphにするときっと一列になる
-        # まずは rank constraint なしで time container を cluster subgraph ��して様子見
+        # まずは rank constraint なしで time container を cluster subgraph して様子見
         output += (
             f"subgraph cluster{ix}{{ rank=same; ordering=out;"
             + "; ".join([f"T{e.id}" for e in container.all_ents()])
@@ -79,6 +81,8 @@ def generate_dot(doc: Document) -> str:
 
 
 class TimeContainer:
+    """Time container to store the entities occuring at the same time."""
+
     def __init__(self, ents: Optional[List[Entity]] = None):
         self.b_ents: Set[Entity] = set()
         self.t_ents: Set[Entity] = set()
@@ -95,6 +99,11 @@ class TimeContainer:
         return f"<TC head={repr(self.head)[1:-1]}>"
 
     def add(self, ent: Entity) -> None:
+        """Add an entity.
+
+        Args:
+            ent (Entity): an entity to add.
+        """
         if ent.tag == "TIMEX3":
             if "value" in ent.rels_from:
                 self.b_ents.add(ent)
@@ -104,10 +113,20 @@ class TimeContainer:
             self.b_ents.add(ent)
 
     def add_all(self, ents: Iterable[Entity]) -> None:
+        """Add multiple entities at once.
+
+        Args:
+            ents (Iterable[Entity]): entities to add
+        """
         for e in ents:
             self.add(e)
 
     def all_ents(self) -> Set[Entity]:
+        """Return all entities inside.
+
+        Returns:
+            Set[Entity]: a set of entities contained
+        """
         return self.t_ents | self.b_ents
 
     def fix_normtime_value(self) -> None:
@@ -143,6 +162,11 @@ class TimeContainer:
             return None
 
     def find_head_timex(self) -> None:
+        """Find and set the 'head' TIMEX3 entity
+
+        Raises:
+            ValueError: if no timex3 entities inside
+        """
         datetimes = [t for t in self.t_ents if t.attrs["type"] in ["DATE", "TIME"]]
         if datetimes:
             for dt in datetimes:
@@ -165,15 +189,13 @@ class TimeContainer:
         # self -after-> other | self -start-> other
         for t_ent in self.t_ents:
             for type_, ents in t_ent.rels_to.items():
-                if ents & other.t_ents:
-                    if type_ in ["after", "start"]:
-                        return True
+                if ents & other.t_ents and type_ in ["after", "start"]:
+                    return True
         # self <-before- other | self <-finish- other
         for t_ent in other.t_ents:
             for type_, ents in t_ent.rels_to.items():
-                if ents & self.t_ents:
-                    if type_ in ["before", "finish"]:
-                        return True
+                if ents & self.t_ents and type_ in ["before", "finish"]:
+                    return True
         return False
 
     def rel_before(self, other):
@@ -181,15 +203,13 @@ class TimeContainer:
         # self -before-> other | self -finish-> other
         for t_ent in self.t_ents:
             for type_, ents in t_ent.rels_to.items():
-                if ents & other.t_ents:
-                    if type_ in ["before", "finish"]:
-                        return True
+                if ents & other.t_ents and type_ in ["before", "finish"]:
+                    return True
         # self <-after- other | self <-start- other
         for t_ent in other.t_ents:
             for type_, ents in t_ent.rels_to.items():
-                if ents & self.t_ents:
-                    if type_ in ["after", "start"]:
-                        return True
+                if ents & self.t_ents and type_ in ["after", "start"]:
+                    return True
         return False
 
     def __lt__(self, other):  # self < other
@@ -205,47 +225,41 @@ class TimeContainer:
                 print(repr(m_date_other), file=sys.stderr)
                 raise
             return dt_self < dt_other
-        else:
-            # no "value" for TIMEX, infer time relations
-            # NOTE: based only on two TCs, perfect inference is not possible
-            # see sort_tcs()'s latter processing
-            for t_ent in self.t_ents:
-                for type_, ents in t_ent.rels_to.items():
-                    if ents & other.t_ents:
-                        if type_ in ["before", "finish"]:
-                            return True
-                        elif type_ in ["after", "start"]:
-                            return False
-            for t_ent in other.t_ents:
-                for type_, ents in t_ent.rels_to.items():
-                    if ents & self.t_ents:
-                        if type_ in ["before", "finish"]:
-                            return False
-                        elif type_ in ["after", "start"]:
-                            return True
-            # raise ValueError("Both TimeContainers in comparison must have head TIMEX3.")
-            # FIXME: ad-hock operation for List[TC] sorting
-            # list.sort() only uses __lt__()
-            return False
+        # ELSE: no "value" for TIMEX, infer time relations
+        # NOTE: based only on two TCs, perfect inference is not possible
+        # see sort_tcs()'s latter processing
+        for t_ent in self.t_ents:
+            for type_, ents in t_ent.rels_to.items():
+                if ents & other.t_ents:
+                    if type_ in ["before", "finish"]:
+                        return True
+                    if type_ in ["after", "start"]:
+                        return False
+        for t_ent in other.t_ents:
+            for type_, ents in t_ent.rels_to.items():
+                if ents & self.t_ents:
+                    if type_ in ["before", "finish"]:
+                        return False
+                    if type_ in ["after", "start"]:
+                        return True
+        # raise ValueError("Both TimeContainers in comparison must have head TIMEX3.")
+        # FIXME: ad-hock operation for List[TC] sorting
+        # list.sort() only uses __lt__()
+        return False
 
     def __le__(self, other):
         if self.__lt__(other):
             return True
-        else:
-            if self.head and other.head:
-                dt_self = datetime.fromisoformat(self.head.attrs["value"][:10])
-                dt_other = datetime.fromisoformat(other.head.attrs["value"][:10])
-                return dt_self <= dt_other
-            else:
-                raise ValueError(
-                    "Both TimeContainers in comparison must have head TIMEX3."
-                )
+        if self.head and other.head:
+            dt_self = datetime.fromisoformat(self.head.attrs["value"][:10])
+            dt_other = datetime.fromisoformat(other.head.attrs["value"][:10])
+            return dt_self <= dt_other
+        raise ValueError("Both TimeContainers in comparison must have head TIMEX3.")
 
     def __eq__(self, other):
         if self.head and other.head:
             return self.head.attrs["value"][:10] == other.head.attrs["value"][:10]
-        else:
-            raise ValueError("Both TimeContainers in comparison must have head TIMEX3.")
+        raise ValueError("Both TimeContainers in comparison must have head TIMEX3.")
 
     def __ne__(self, other):
         return not self.__eq__(other)
@@ -262,17 +276,20 @@ def _tc_debug_printer(section, tcs):
     table: List[List[str]] = []
     for container in tcs:
         tlist = [container.splittable, container.head] + list(
-            container.t_ents - set([container.head])
+            container.t_ents - {container.head}
         )
+
         table.append([repr(ent) for ent in tlist + list(container.b_ents)])
     print("\n".join(["\t".join(row) for row in table]), file=sys.stderr)
     print(file=sys.stderr)
 
 
 def make_time_containers(entities: List[Entity]) -> List[TimeContainer]:
-    """
+    """Analyse all entities in a document to generate time containers.
+
     time containers = timex clusters connected with 'on'
 
+    Steps:
     - make absolute time expressions parent of time containers
     - order time containers chronologically
     """
@@ -291,7 +308,7 @@ def make_time_containers(entities: List[Entity]) -> List[TimeContainer]:
     # _tc_debug_printer("==BEFORE WHILE==", time_containers)
     time_containers = merge_tcs(time_containers)
     # _tc_debug_printer("==FIRST MERGE==", time_containers)
-    while any([tc.splittable for tc in time_containers]):
+    while any(tc.splittable for tc in time_containers):
         time_containers = [tc_ for tc in time_containers for tc_ in split_tc(tc)]
         time_containers = merge_tcs(time_containers)
 
@@ -307,20 +324,34 @@ def make_time_containers(entities: List[Entity]) -> List[TimeContainer]:
 
 
 def is_isolate_tc(tc: TimeContainer) -> bool:
+    """Check if this time container is isolated or not."""
     if tc.b_ents:
         return False
-    else:
-        for t_ent in tc.t_ents:
-            if t_ent.rels_to.keys() & TREL_NOT_ON:
-                return False
-            elif t_ent.rels_from.keys() & TREL_NOT_ON:
-                return False
+    for t_ent in tc.t_ents:
+        if t_ent.rels_to.keys() & TREL_NOT_ON:
+            return False
+        if t_ent.rels_from.keys() & TREL_NOT_ON:
+            return False
     return True
 
 
 def make_tc_helper(
     ent: Entity, tc: TimeContainer, to_: bool = True, from_: bool = True
 ) -> TimeContainer:
+    """Recursive function to create a time container.
+
+    Traverse all 'related' entities of the input entity
+    to include them into a given time container.
+
+    Args:
+        ent (Entity): an entity to process.
+        tc (TimeContainer): a time container of focus.
+        to_ (bool, optional): whether to process rels_to. Defaults to True.
+        from_ (bool, optional): whether to process rels_from. Defaults to True.
+
+    Returns:
+        TimeContainer: updated `tc`
+    """
     if ent not in tc.all_ents():
         tc.add(ent)
         froms = ent.rels_from.get("on", set()) if from_ else set()
@@ -338,18 +369,18 @@ def split_tc(tc: TimeContainer) -> List[TimeContainer]:
     tc.fix_normtime_value()
     if not tc.splittable:
         return [tc]
+    split_tcs: List[TimeContainer] = []
 
+    # if different dates are contained in this `tc`,
+    # then split it per each date
     datetimes = [te for te in tc.t_ents if te.attrs["type"] in ["DATE", "TIME"]]
     datedic: Dict[str, List[Entity]] = {}
     for t_ent in datetimes:
         m = PTN_DATE.search(t_ent.attrs["value"])
         if m:  # dismiss all non-ISO date values
             datedic.setdefault(m.group(0), []).append(t_ent)
-    durs = [te for te in tc.t_ents if te.attrs["type"] == "DURATION"]
-
-    split_tcs: List[TimeContainer] = []
     if len(datedic.keys()) > 1:  # multi-dates
-        for date, t_ents in datedic.items():
+        for t_ents in datedic.values():
             a_tc = TimeContainer()
             for t_ent in t_ents:
                 a_tc = make_tc_helper(t_ent, a_tc, to_=False)
@@ -357,7 +388,10 @@ def split_tc(tc: TimeContainer) -> List[TimeContainer]:
             a_tc.find_head_timex()
             split_tcs.append(a_tc)
         return split_tcs
-    elif durs:  # splittable if date-on-duration
+
+    # splittable if date-on-duration
+    durs = [te for te in tc.t_ents if te.attrs["type"] == "DURATION"]
+    if durs:
         for dur in durs:
             for type_, tos in dur.rels_to.items():
                 dur_on_to = tc.t_ents & tos
@@ -391,15 +425,30 @@ def split_tc(tc: TimeContainer) -> List[TimeContainer]:
                 rest_tc.find_head_timex()
                 split_tcs.append(rest_tc)
             return split_tcs
-        else:
-            tc.splittable = False
-            return [tc]
-    else:
+        # else:
         tc.splittable = False
         return [tc]
+    # else:
+    tc.splittable = False
+    return [tc]
 
 
 def parse_duration_value(dur_val: str, date: str = "", neg: bool = False) -> str:
+    """Parse [TIMEX3 type=duration]'s normalised value.
+
+    Since Timex3[dur] has the length of the duration only,
+    we have no idea about when this duration locates in a 'date' level.
+    This function tries to give the start or end date of the given timex3[dur].
+
+    Args:
+        dur_val (str): the time value of a timex3[dur]
+        date (str, optional): an associated date. Defaults to "".
+        neg (bool, optional): give True if the duration occurred before the date.
+                                Defaults to False.
+
+    Returns:
+        str: ISO formatted date value
+    """
     if date:
         the_date = datetime.fromisoformat(date)
     else:  # FIXME
@@ -448,8 +497,7 @@ def parse_duration_value(dur_val: str, date: str = "", neg: bool = False) -> str
 
 def merge_tcs(tcs: List[TimeContainer]) -> List[TimeContainer]:
     """Merge same-date TCs."""
-    datedic: Dict[str, List[TimeContainer]] = {}
-    datedic["UNK"] = []
+    datedic: Dict[str, List[TimeContainer]] = {"UNK": []}
     for tc in tcs:
         try:
             m = PTN_DATE.search(tc.head.attrs["value"])
@@ -501,42 +549,37 @@ def sort_tcs(tcs: List[TimeContainer]) -> List[TimeContainer]:
     g: Dict[str, Set[str]] = {ai: set() for ai in atcs_ix}  # 後 ← 前 の時間関係グラフ
     if len(atcs_ix) > 1:
         for ai, ai_ in zip(atcs_ix, atcs_ix[1:]):
-            g[ai_] |= set([ai])
-            g[ai] |= set(
-                [
-                    f"r{i}"
-                    for i, tc in enumerate(relative_tcs)
-                    if absolute_tcs[int(ai[1:])].rel_after(tc)
-                ]
-            )
-            g[ai_] |= set(
-                [
-                    f"r{i}"
-                    for i, tc in enumerate(relative_tcs)
-                    if absolute_tcs[int(ai_[1:])].rel_after(tc)
-                ]
-            )
-    elif len(atcs_ix) == 1:
-        g["a0"] |= set(
-            [
+            g[ai_] |= {ai}
+            g[ai] |= {
                 f"r{i}"
                 for i, tc in enumerate(relative_tcs)
-                if absolute_tcs[0].rel_after(tc)
-            ]
-        )
+                if absolute_tcs[int(ai[1:])].rel_after(tc)
+            }
+
+            g[ai_] |= {
+                f"r{i}"
+                for i, tc in enumerate(relative_tcs)
+                if absolute_tcs[int(ai_[1:])].rel_after(tc)
+            }
+
+    elif len(atcs_ix) == 1:
+        g["a0"] |= {
+            f"r{i}"
+            for i, tc in enumerate(relative_tcs)
+            if absolute_tcs[0].rel_after(tc)
+        }
+
     for i, rtc in enumerate(relative_tcs):
         if f"r{i}" not in g:
             g[f"r{i}"] = set()
-        g[f"r{i}"] |= set(
-            [
-                f"r{j}"
-                for j, tc in enumerate(relative_tcs)
-                if i != j and rtc.rel_after(tc)
-            ]
-        )
-        g[f"r{i}"] |= set(
-            [f"a{j}" for j, tc in enumerate(absolute_tcs) if rtc.rel_after(tc)]
-        )
+        g[f"r{i}"] |= {
+            f"r{j}" for j, tc in enumerate(relative_tcs) if i != j and rtc.rel_after(tc)
+        }
+
+        g[f"r{i}"] |= {
+            f"a{j}" for j, tc in enumerate(absolute_tcs) if rtc.rel_after(tc)
+        }
+
     try:
         # print(g, file=sys.stderr)
         sorted_ix = toposort_flatten(g)
@@ -570,6 +613,12 @@ def relate_dct(doc: Document) -> None:
 
 
 def normalise_all_timex(doc: Document, dct: str) -> None:
+    """Normalise all timex3 entities in a document.
+
+    Args:
+        doc (Document): the document to process
+        dct (str): document creation time
+    """
     for entity in doc.entities:
         if entity.tag != "TIMEX3":
             continue
@@ -582,7 +631,15 @@ def normalise_all_timex(doc: Document, dct: str) -> None:
             # the return of `normalize` follows TimeL's 'value' spec
 
 
-def toposort_region_value(ents):
+def toposort_region_value(ents: Iterable[Entity]) -> List[Entity]:
+    """Topologically sort subRegion and keyValue relations.
+
+    Args:
+        ents (Iterable[Entity]): entities to sort
+
+    Returns:
+        List[Entity]: sorted entities
+    """
     g: Dict[Id, Set[Id]] = {ent.id: set() for ent in ents}
     for ent in ents:
         if "region" in ent.rels_from:
@@ -603,6 +660,17 @@ def toposort_region_value(ents):
 
 
 def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = True) -> str:
+    """Convert time containers to JSON.
+
+    Args:
+        tcs (List[TimeContainer]): time containers
+        doc (Document): a document to process
+        garbage (bool, optional): set True if garbage entities needed in the output.
+                                    Defaults to True.
+
+    Returns:
+        str: JSON string
+    """
     times = []
     entities = []
     embeded_ids = []
@@ -680,6 +748,17 @@ def to_json(tcs: List[TimeContainer], doc: Document, garbage: bool = True) -> st
 
 
 def find_head_id(id_: Id, tcs: List[TimeContainer]) -> Id:
+    """Find the head entity's ID of a TC to which the input ID belongs
+    among the given TCs
+
+    Args:
+        id_ (Id): an ID to query.
+        tcs (List[TimeContainer]): TCs to search for.
+
+    Returns:
+        Id: the head entity's ID.
+            return 0 if no match.
+    """
     for tc in tcs:
         if id_ in [e.id for e in tc.all_ents()]:
             return tc.head.id
@@ -687,6 +766,7 @@ def find_head_id(id_: Id, tcs: List[TimeContainer]) -> Id:
 
 
 def is_earlier(tid1, tid2, tcs):
+    """Helper function to judge which timex is earlier."""
     head_ids = [tc.head.id for tc in tcs]
     ix_tid1 = head_ids.index(tid1)
     ix_tid2 = head_ids.index(tid2)
@@ -694,6 +774,7 @@ def is_earlier(tid1, tid2, tcs):
 
 
 def infer_timespan(e, tcs, on_a_tc=None):
+    """Infer an exact chronological span of an entity as much as possible."""
     if not (set(e.rels_to.keys()) & set(Relation.time_rels)):
         return []
 
@@ -708,17 +789,17 @@ def infer_timespan(e, tcs, on_a_tc=None):
         before_id = find_head_id(list(e.rels_to["before"])[0].id, tcs)
         if is_earlier(start_id, before_id, tcs):
             return [start_id, before_id]
-        elif on_a_tc:
+        if on_a_tc:
             # before < start; CORRUPTED
             if is_earlier(start_id, on_a_tc.head.id, tcs):
                 # assume "start" is reliable
                 return [start_id, on_a_tc.head.id]
-            elif is_earlier(on_a_tc.head.id, before_id, tcs):
+            if is_earlier(on_a_tc.head.id, before_id, tcs):
                 # assume "before" is reliable
                 return [on_a_tc.head.id, before_id]
-        else:
-            # assume "start" is reliable
-            return [start_id, tcs[-1].head.id]
+        # else:
+        # assume "start" is reliable
+        return [start_id, tcs[-1].head.id]
 
     elif "finish" in e.rels_to and "after" in e.rels_to:
         after_id = find_head_id(list(e.rels_to["after"])[0].id, tcs)
@@ -770,6 +851,7 @@ def infer_timespan(e, tcs, on_a_tc=None):
 
 
 def embed_anatomy(a, embeded_ids):
+    """Embed an anatomy entity into JSON."""
     anat = {"id": a.id, "text": a.text, "feature": [], "contain": []}
     embeded_ids.append(a.id)
 
@@ -788,6 +870,7 @@ def embed_anatomy(a, embeded_ids):
 
 
 def embed_feature(e, embeded_ids):
+    """Embed a feature entity into JSON."""
     if "feature" in e.rels_from:
         embeded_ids.extend([f.id for f in e.rels_from["feature"]])
         return [f.text for f in e.rels_from["feature"]]
@@ -796,6 +879,7 @@ def embed_feature(e, embeded_ids):
 
 
 def embed_change(e, embeded_ids, tcs):
+    """Embed a change entity into JSON."""
     changes = []
     if "change" in e.rels_from:
         for cha in e.rels_from["change"]:
@@ -814,6 +898,7 @@ def embed_change(e, embeded_ids, tcs):
 
 
 def embed_entity_init(e, embeded_ids):
+    """Common initialisation of an JSON-embeded entity."""
     ent = {
         "id": e.id,
         "tag": e.tag,
@@ -833,6 +918,7 @@ def embed_entity_init(e, embeded_ids):
 
 
 def embed_entity(e, tcs, embeded_ids, on_a_tc=None, anat=None):
+    """Embed an entity into JSON."""
     # Assume topologically sorted by region and value
 
     ent = embed_entity_init(e, embeded_ids)
@@ -886,6 +972,7 @@ def embed_entity(e, tcs, embeded_ids, on_a_tc=None, anat=None):
 
 
 def embed_garbage(e):
+    """Embed an entity that is not rendered in a timeline output (garbage)."""
     return {
         "id": e.id,
         "tag": e.tag,
@@ -902,6 +989,7 @@ def embed_garbage(e):
 
 
 def trace_region(embeded, e_ids):
+    """Trace subRegion relations."""
     e_ids.append(embeded["id"])
     if embeded["region"]:
         containeds = [cont for conts in embeded["region"].values() for cont in conts]
@@ -911,6 +999,21 @@ def trace_region(embeded, e_ids):
 
 
 def main(filename_r, dct, debug=False, dot=False, repl=False):
+    """MAIN.
+
+    Args:
+        filename_r (str): a `recover_omit`-ed ANN file path.
+        dct (str): the document creation time.
+        debug (bool, optional): True if debug info is needed. Defaults to False.
+                                raw Time Container tables will output in stdout.
+        dot (bool, optional): set True to output DOT format text.
+                                Defaults to False, i.e. JSON for HeaRT is default.
+        repl (bool, optional): set True to investigate processed objects with python-fire.
+                                Defaults to False.
+
+    Returns:
+        Tuple[Document, List[containers]]: only if repl=True.
+    """
     doc = Document(filename_r)
     relate_dct(doc)
     normalise_all_timex(doc, dct)

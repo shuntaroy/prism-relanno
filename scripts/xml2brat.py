@@ -28,19 +28,21 @@ TAGNAMES = {
     "p": "Pending",
 }
 
+# TODO: Relation!
+
 
 def len_null(a):
-    if a is None:
-        return 0
-    else:
-        return len(a)
+    """Return length of the input even if it is None (=> 0)."""
+    return 0 if a is None else len(a)
 
 
 def get_plain_text(root):
+    """Get a plain, bare text of an XML-tagged text."""
     return "".join(root.itertext()).lstrip()
 
 
 def root_to_df(root, plain_text):
+    """Convert an XML object to Table."""
     csr = 0
     data = []
     root.text = root.text.lstrip()
@@ -61,35 +63,36 @@ def root_to_df(root, plain_text):
             ]
         )
         csr += len_null(e.text) + len_null(e.tail)
-        df = pd.DataFrame(
-            data,
-            columns=[
-                "tag",
-                "attrib",
-                "text",
-                "tail",
-                "start_pos",
-                "end_pos",
-                "orig",
-                "matchOrig",
-            ],
-        )
+    df = pd.DataFrame(
+        data,
+        columns=[
+            "tag",
+            "attrib",
+            "text",
+            "tail",
+            "start_pos",
+            "end_pos",
+            "orig",
+            "matchOrig",
+        ],
+    )
     assert df.iloc[1:]["matchOrig"].all(), "\n" + str(df)
     return df.iloc[1:]
 
 
 def row_to_tagstr(row):
-    if "\n" in row.text:  # assume #\n == 1 (more than that is illegal)
-        n_pos = row.text.find("\n")
-        fend_pos = row.start_pos + n_pos
-        sstart_pos = fend_pos + 1
-        text_ = row.text.replace("\n", " ")
-        return f"T{row.name}\t{TAGNAMES[row.tag.lower()]} {row.start_pos} {fend_pos};{sstart_pos} {row.end_pos}\t{text_}"
-    else:
+    """Convert a Table row to ANN's Tag format"""
+    if "\n" not in row.text:  # assume #\n == 1 (more than that is illegal)
         return f"T{row.name}\t{TAGNAMES[row.tag.lower()]} {row.start_pos} {row.end_pos}\t{row.text}"
+    n_pos = row.text.find("\n")
+    fend_pos = row.start_pos + n_pos
+    sstart_pos = fend_pos + 1
+    text_ = row.text.replace("\n", " ")
+    return f"T{row.name}\t{TAGNAMES[row.tag.lower()]} {row.start_pos} {fend_pos};{sstart_pos} {row.end_pos}\t{text_}"
 
 
 def df_to_tagstrs(df):
+    """Convert all entities in a whole Table to ANN-formatted strings."""
     return df.apply(
         row_to_tagstr,
         axis=1,
@@ -97,11 +100,13 @@ def df_to_tagstrs(df):
 
 
 def row_to_attrstr(row):
+    """Convert a Table row to ANN's Attribute format"""
     key, val = list(row.attrib.items())[0]
     return f"A{row.name + 1}\t{key} T{row['index']} {val}"
 
 
 def df_to_attrstrs(df):
+    """Convert all attribute info in a whole Table to ANN-formatted strings."""
     return (
         df[df.attrib != {}]
         .reset_index()  # to generate attr IDs
@@ -114,20 +119,22 @@ def df_to_attrstrs(df):
 
 
 def get_first_child(elem):
+    """Get the first child of an XML Element"""
     it = elem.iter()
     next(it)  # == elem itself
     return next(it)
 
 
 def get_real_root(elem):
+    """Get the 'real' root element.
+    This returns the direct parent that contains the PRISM tags.
+    """
     child = get_first_child(elem)
-    if child.tag.lower() not in TAGNAMES.keys():
-        return get_real_root(child)
-    else:
-        return elem
+    return elem if child.tag.lower() in TAGNAMES.keys() else get_real_root(child)
 
 
 def main(dirpath, output_path, trav=False):
+    """MAIN."""
     p = Path(dirpath)
     assert p.is_dir()
     p_lst = list(p.iterdir())
