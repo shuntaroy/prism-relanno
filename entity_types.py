@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import io
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, NewType, Set, Tuple, TypeVar
+from typing import Dict, List, NewType, Optional, Set, Tuple, TypeVar
 from xml.sax import saxutils, xmlreader
 
 Id = NewType("Id", int)
@@ -28,6 +29,21 @@ BRAT2HTML = {
     "ClinicalContext": "cc",
     "Remedy": "remedy",
     "Pending": "pending",
+}
+XML2BRAT = {
+    "d": "Disease",
+    "a": "Anatomical",
+    "f": "Feature",
+    "c": "Change",
+    "timex3": "TIMEX3",
+    "t-test": "TestTest",
+    "t-key": "TestKey",
+    "t-val": "TestVal",
+    "m-key": "MedicineKey",
+    "m-val": "MedicineVal",
+    "cc": "ClinicalContext",
+    "r": "Remedy",
+    "p": "Pending",
 }
 
 
@@ -233,7 +249,54 @@ class Entity:
 class Document:
     """Store of all annotations."""
 
-    def __init__(self, filename: str):
+    @classmethod
+    def from_xml(cls, fname_or_xmlstr: str) -> Document:
+        """Create a Document from XML.
+
+        Args:
+            fname_or_xmlstr (str): If it's a file name,
+                the structure should be <root>...PRISM-tagged text...</root>.
+                If it's a XML-tagged string,
+                the structure should be "...PRISM-tagged text...".
+
+        Returns:
+            Document: a Document instance.
+        """
+        p = Path(fname_or_xmlstr)
+        if p.is_file() and p.suffix == ".xml":
+            root = ET.parse(p).getroot()
+        else:
+            root = ET.fromstring(f"<root>{fname_or_xmlstr}</root>")
+        doc = Document()
+        a_id = 1
+        for elem in root.iter():
+            tag = elem.tag.lower()
+            if tag in XML2BRAT:
+                id_ = int(elem.attrib["tid"][1:])
+                doc.entities.append(
+                    Entity(Id(id_), XML2BRAT[tag], (id_, id_), elem.text)
+                )
+                for attrkey in ["certainty", "type", "state", "DCT-Rel"]:
+                    if attrkey in elem.attrib:
+                        doc.attributes.append(
+                            Attribute(a_id, attrkey, id_, elem.attrib[attrkey])
+                        )
+                        a_id += 1
+            if elem.tag.lower() == "brel":
+                r_id = int(elem.attrib["rid"][1:])
+                doc.relations.append(
+                    Relation(
+                        r_id,
+                        elem.attrib["reltype"],
+                        Id(int(elem.attrib["arg1"][1:])),
+                        Id(int(elem.attrib["arg2"][1:])),
+                    )
+                )
+
+        doc._build_doc()
+        return doc
+
+    def __init__(self, filename: Optional[str] = None):
         self.entities: List[Entity] = []
         self.attributes: List[Attribute] = []
         self.relations: List[Relation] = []
@@ -250,17 +313,18 @@ class Document:
         self.update_needed = False
         # if True, there is relation/attribute updates, implying the need for update to self.relations/attributes
 
-        p = Path(filename)
-        if p.suffix == ".ann":
-            with open(p, "r") as fi:
-                for line in fi:
-                    self._read_ann_line(line.strip())
-            with open(p.with_suffix(".txt"), "r") as ftxt:
-                self.txt = ftxt.read()
-        else:
-            raise ValueError("Specify BRAT .ann file.")
+        if filename:
+            p = Path(filename)
+            if p.suffix == ".ann":
+                with open(p, "r") as fi:
+                    for line in fi:
+                        self._read_ann_line(line.strip())
+                with open(p.with_suffix(".txt"), "r") as ftxt:
+                    self.txt = ftxt.read()
+            else:
+                raise ValueError("Specify BRAT .ann file.")
 
-        self._build_doc()
+            self._build_doc()
 
     def _read_ann_line(self, line: str) -> None:
         assert self.isbuilt is False
