@@ -2,6 +2,8 @@
 
 Visualise relation annotations for human.
 
+> This project is under my personal use yet.
+
 ## Requirements
 
 - Python 3.6--3.8 (not compatible with 3.9 due to old type hints)
@@ -9,8 +11,8 @@ Visualise relation annotations for human.
 ## Usage
 
 - `recover_omit.py` で省略された関係を復元した `-r.ann`ファイルを作る
-- `visualise_rel.py` で基本関係のdot scriptがstdoutされるので，graphvizできる
-- `visualise_time.py` は時間関係を処理する．同じ時点に属するEntityをTimeContainerにまとめる，など．
+- `visualise_rel.py` で基本関係の dot script が stdout されるので，graphviz できる
+- `visualise_time.py` は時間関係を処理する．同じ時点に属する Entity を TimeContainer にまとめる，など．
 
 ### Timeline information for HeaRT input
 
@@ -28,10 +30,9 @@ $ python visualise_time.py XXX-r.ann 2014-03-20 > XXX.json
 
 ### use as a library
 
-`entity_types.py` に便利なクラスがいろいろあるので，bratからpython-readableなobjectを作って好きな用途に使用できる．
+`entity_types.py` に便利なクラスがいろいろあるので，brat から python-readable な object を作って好きな用途に使用できる．
 
-APIとしては…
-
+API としては…
 
 ## TODOs for Refactor/Improvement
 
@@ -41,7 +42,8 @@ APIとしては…
 
 ## Notes
 
------------------------------------
+---
+
 # Appendix
 
 Related notes for reference.
@@ -50,7 +52,7 @@ Related notes for reference.
 
 ### 'on' in Time relation
 
-> ある基本タグXと，ある時間タグTとの間のon関係は，Xの直前の基本タグYが同じ時間タグTとon関係をもつ場合には省略してよい．
+> ある基本タグ X と，ある時間タグ T との間の on 関係は，X の直前の基本タグ Y が同じ時間タグ T と on 関係をもつ場合には省略してよい．
 
 DCT-Rel also follows.
 
@@ -58,7 +60,7 @@ DCT-Rel also follows.
 
 T/M-key --- value
 
-1:1　で連続している時は省略可能
+1:1 　で連続している時は省略可能
 
 <!-- ### 同格関係の複数タグから付与する region 関係
 
