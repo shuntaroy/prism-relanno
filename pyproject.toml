@@ -5,15 +5,15 @@ description = "Relation data handler for PRISM annotation"
 authors = ["Shuntaro Yada <contact@shuntaroy.com>"]
 
 [tool.poetry.dependencies]
-python = ">= 3.7"
+python = ">= 3.8, < 3.9"
 fire = "^0.3.1"
 normtime = { git = "https://github.com/ku-nlp/normtime.git", develop = true }
 # normtime = { path = "./normtime/", develop = true }
 python-dateutil = "^2.8.1"
-pandas = "^1.1.5"
+pandas = "^1.1"
 tqdm = "^4.56.2"
 toposort = "^1.6"
-fastapi = {extras = ["all"], version = "^0.78.0"}
+fastapi = { extras = ["all"], version = "^0.78.0" }
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.782"
