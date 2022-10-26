@@ -1,3 +1,9 @@
+# For HeaRT-API
+
+See [`./README-API.md`](./README-API.md) instead.
+
+---
+
 # PRISM-RelAnno
 
 Visualise relation annotations for human.

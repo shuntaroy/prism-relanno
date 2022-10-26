@@ -18,11 +18,17 @@ class Req(BaseModel):
 
 app = FastAPI()
 
-JAMIE = "https://aoi.naist.jp/jamie"
+JAMIE = "http://kogecha.naist.jp:1234/json"  # Please specify a JaMIE endpoint URL here.
 
 
 def process_time(text: str, dct: Union[str, None] = None):
-    res_jamie = requests.get(JAMIE, params={"text": text}).json()
+    try:
+        res_jamie = requests.get(JAMIE, params={"text": text}).json()
+    except Exception:
+        return {
+            "status": "Failure",
+            "message": "JaMIE endpoint is dead:\n" + traceback.format_exc(),
+        }
     if res_jamie["status"] != "Success":
         return {
             "status": "Failure",
