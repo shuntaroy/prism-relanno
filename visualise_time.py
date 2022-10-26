@@ -601,10 +601,12 @@ def relate_dct(doc: Document) -> None:
     assert doc.isbuilt
 
     # create the DCT entity
-    # dct = Entity(Id(-1), "TIMEX3", (-2, -1), "DCT", doc=doc)  # values are incompatible with brat
     dct = Entity(
-        Id(5001), "TIMEX3", (0, 2), "##", doc=doc
-    )  # for iaa calculation (ad-hoc)
+        Id(-1), "TIMEX3", (-2, -1), "DCT", doc=doc
+    )  # values are incompatible with brat
+    # dct = Entity(
+    #     Id(5001), "TIMEX3", (0, 2), "##", doc=doc
+    # )  # for iaa calculation (ad-hoc)
     dct.attrs["type"] = "DATE"
     doc.entities.insert(0, dct)
 

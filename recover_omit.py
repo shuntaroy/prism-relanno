@@ -16,7 +16,7 @@ from visualise_time import relate_dct
 # def debug_print(*obj):
 #     print(*obj)
 #     time.sleep(1)
-DCT_ID = 5001  # -1
+DCT_ID = -1
 
 
 def recover_on(doc: Document) -> None:

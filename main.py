@@ -18,7 +18,7 @@ class Req(BaseModel):
 
 app = FastAPI()
 
-JAMIE = ""  # Please specify a JaMIE endpoint URL here.
+JAMIE = "http://kogecha.naist.jp:1234/json"  # Please specify a JaMIE endpoint URL here.
 
 
 def process_time(text: str, dct: Union[str, None] = None):
