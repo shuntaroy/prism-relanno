@@ -10,6 +10,7 @@
     - 成功時: `{"status": "Success", "text": "PRISMアノテーション仕様XML形式に準拠した解析結果"}`
     - 失敗時: `{"status": "Failure", "error": "エラーメッセージ"}`
   - `main.py` の global 変数 `JAMIE` に，その API の URL を指定してください
+- `Dockerfile`, `compose.yaml` があるので，Docker で動かすこともできます
 
 入力 POST
 
@@ -33,7 +34,7 @@
 
 ```
 {
-    "status": "Failure",
+    "status": "Failed",
     "message": "エラーメッセージ"
 }
 ```

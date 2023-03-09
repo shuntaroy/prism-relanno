@@ -1,1 +1,8 @@
+requests
+fastapi[all]
+tqdm
+pandas
 fire
+toposort
+python-dateutil
+git+https://github.com/ku-nlp/normtime.git

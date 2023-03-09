@@ -1,0 +1,10 @@
+services:
+  prism-relanno:
+    restart: always
+    build: .
+    container_name: 'prism-relanno'
+    ports:
+      - '51235:51235'
+      - '51234:51234'
+    environment:
+      - JAMIE_ENDPOINT="http://localhost:51234/json"

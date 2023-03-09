@@ -1,4 +1,5 @@
 """HeaRT endpoint."""
+import os
 import traceback
 from typing import Union
 
@@ -18,7 +19,7 @@ class Req(BaseModel):
 
 app = FastAPI()
 
-JAMIE = "http://kogecha.naist.jp:1234/json"  # Please specify a JaMIE endpoint URL here.
+JAMIE = os.environ["JAMIE_ENDPOINT"]  # Please specify a JaMIE endpoint URL here.
 
 
 def process_time(text: str, dct: Union[str, None] = None):
@@ -26,17 +27,17 @@ def process_time(text: str, dct: Union[str, None] = None):
         res_jamie = requests.get(JAMIE, params={"text": text}).json()
     except Exception:
         return {
-            "status": "Failure",
+            "status": "Failed",
             "message": "JaMIE endpoint is dead:\n" + traceback.format_exc(),
         }
     if res_jamie["status"] != "Success":
         return {
-            "status": "Failure",
+            "status": "Failed",
             "message": "JaMIE endpoint returns an error:\n" + res_jamie["error"],
         }
     if not res_jamie["text"]:
         return {
-            "status": "Failure",
+            "status": "Failed",
             "message": "JaMIE returned nothing, without explicit failure.",
         }
     xml_text = "\n".join(res_jamie["text"])
@@ -46,7 +47,7 @@ def process_time(text: str, dct: Union[str, None] = None):
         res_time = main_lib(doc, dct)
     except Exception:
         return {
-            "status": "Failure",
+            "status": "Failed",
             "message": "Timeline processing failed:\n" + traceback.format_exc(),
         }
     return {"status": "Success", "response": res_time}
