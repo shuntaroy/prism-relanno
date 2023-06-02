@@ -1,11 +1,12 @@
 """HeaRT endpoint."""
-import os
 import traceback
+from datetime import datetime
 from typing import Union
 
 import requests
 from fastapi import FastAPI
 from pydantic import BaseModel
+from tinydb import TinyDB
 
 from entity_types import Document
 from recover_omit import recover_all
@@ -17,7 +18,9 @@ class Req(BaseModel):
     dct: Union[str, None]
 
 
-app = FastAPI()
+app = FastAPI(debug=True)
+
+db = TinyDB("db.json")
 
 JAMIE = os.environ["JAMIE_ENDPOINT"]  # Please specify a JaMIE endpoint URL here.
 
@@ -25,7 +28,7 @@ JAMIE = os.environ["JAMIE_ENDPOINT"]  # Please specify a JaMIE endpoint URL here
 def process_time(text: str, dct: Union[str, None] = None):
     try:
         res_jamie = requests.get(JAMIE, params={"text": text}).json()
-    except Exception:
+    except:
         return {
             "status": "Failed",
             "message": "JaMIE endpoint is dead:\n" + traceback.format_exc(),
@@ -43,13 +46,34 @@ def process_time(text: str, dct: Union[str, None] = None):
     xml_text = "\n".join(res_jamie["text"])
     try:
         doc = Document.from_xml(xml_text)
+    except:
+        return {
+            "status": "Failed",
+            "message": "JaMIE returned invalid XML:\n" + xml_text,
+        }
+    try:
         recover_all(doc)
+    except:
+        return {
+            "status": "Failed",
+            "message": "Failted to recover omitted entities and relations:\n"
+            + xml_text,
+        }
+    try:
         res_time = main_lib(doc, dct)
     except Exception:
         return {
             "status": "Failed",
             "message": "Timeline processing failed:\n" + traceback.format_exc(),
         }
+    db.insert(
+        {
+            "created_at": datetime.now().isoformat(),
+            "text": text,
+            "dct": dct,
+            "results": res_time,
+        }
+    )
     return {"status": "Success", "response": res_time}
 
 
