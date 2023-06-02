@@ -72,6 +72,7 @@ def process_time(text: str, dct: Union[str, None] = None):
             "created_at": datetime.now().isoformat(),
             "text": text,
             "dct": dct,
+            "xml_text": xml_text,
             "results": res_time,
         }
     )
