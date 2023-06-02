@@ -1,4 +1,5 @@
 """HeaRT endpoint."""
+import os
 import traceback
 from datetime import datetime
 from typing import Union
