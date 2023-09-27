@@ -47,6 +47,7 @@ XML2BRAT = {
     "r": "Remedy",
     "p": "Pending",
 }
+BRAT2XML = {v: k for k, v in XML2BRAT.items()}
 
 
 class Relation:
@@ -501,3 +502,62 @@ class Document:
             htmlclass = f"{BRAT2HTML[ent.tag]}"
 
         return {"id": f"T{ent.id}", "class": htmlclass}
+
+    def to_xml(self) -> str:
+        self.sortedby_occurrence()
+        ents = self.entities[:]  # shallow copy
+
+        output = io.StringIO()
+        attr_doc = xmlreader.AttributesImpl({"class": "doc"})
+        xmldoc = saxutils.XMLGenerator(output, encoding="UTF-8")
+        xmldoc.startDocument()  # => <?xml version...>
+        xmldoc.startElement("root", attr_doc)  # => <root>
+        cursor = 0
+
+        while ents:
+            ent = ents.pop(0)
+            if ent.id < 0 or ent.span[0] < 0:  # some special entities like DCT
+                continue
+
+            if cursor < ent.span[0]:
+                xmldoc.characters(self.txt[cursor : ent.span[0]])
+            attrdict = ent.attrs
+            attrdict["id"] = str(ent.id)
+            attr = xmlreader.AttributesImpl(attrdict)
+            xmldoc.startElement(BRAT2XML[ent.tag], attr)
+            assert (
+                self.txt[ent.span[0] : ent.span[1]] == ent.text
+            ), f"{self.txt[ent.span[0] : ent.span[1]]} != {ent.text}"
+            xmldoc.characters(ent.text)
+            xmldoc.endElement(BRAT2XML[ent.tag])
+            cursor = ent.span[1]
+
+        if cursor <= len(self.txt) - 1:
+            xmldoc.characters(self.txt[cursor:])
+
+        rels = self.relations[:]
+        while rels:
+            rel = rels.pop(0)
+            relattr = xmlreader.AttributesImpl(
+                {
+                    "id": str(rel.id),
+                    "reltype": rel.name,
+                    "from": str(rel.arg1),
+                    "to": str(rel.arg2),
+                }
+            )
+            if rel.name.startswith("time"):  # old .ann won't work
+                rtag = "trel"
+            else:
+                rtag = "brel"
+            xmldoc.startElement(rtag, relattr)
+            xmldoc.endElement(rtag)
+
+        xmldoc.endElement("root")  # => </root>
+        xmldoc.endDocument()  # => kinda .close()
+        xml = output.getvalue()
+        output.close()  # clear memory
+        xml = xml.replace("></trel>", " />\n")
+        xml = xml.replace("></brel>", " />\n")
+
+        return xml

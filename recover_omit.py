@@ -17,6 +17,8 @@ from visualise_time import relate_dct
 #     print(*obj)
 #     time.sleep(1)
 DCT_ID = -1
+LITERAL_ON = "timeOn"
+LITERAL_VAL = "keyValue"
 
 
 def recover_on(doc: Document) -> None:
@@ -33,17 +35,17 @@ def recover_on(doc: Document) -> None:
                 dct_rel = e.attrs["DCT-Rel"]
             else:
                 dct_rel = None
-            has_on = "on" in e.rels_to
+            has_on = LITERAL_ON in e.rels_to
 
             # debug_print("  has_on =", has_on, "| has_dct_on =", has_dct_on)
-            if dct_rel == "on":
+            if dct_rel == LITERAL_ON:
                 # update on_scope to DCT regardless of whether e has on-rel
                 on_scope = Id(DCT_ID)  # the special value for DCT
                 # debug_print("  update on_scope -> -1")
             else:
                 if has_on:
                     # update on_scope
-                    on_to_ids = [on.id for on in e.rels_to["on"]]
+                    on_to_ids = [on.id for on in e.rels_to[LITERAL_ON]]
                     on_to_timexes = [doc.findby_id(on_to_id) for on_to_id in on_to_ids]
                     # take the first occurence
                     on_scope = sorted(on_to_timexes, key=lambda t: t.span[0])[0].id
@@ -63,10 +65,10 @@ def recover_on(doc: Document) -> None:
                         if not has_time and not (is_gen or is_oth):
                             # on-rel is not needed if e has other time rels
                             if on_scope == DCT_ID:  # == DCT
-                                doc.update_attribute("DCT-Rel", e.id, "on")
+                                doc.update_attribute("DCT-Rel", e.id, LITERAL_ON)
                                 # debug_print("  update DCT-Rel -> on")
                             else:
-                                doc.add_relation("on", e.id, on_scope)
+                                doc.add_relation(LITERAL_ON, e.id, on_scope)
                                 # debug_print("  add on-rel ->", doc.findby_id(on_scope))
     # doc.update_doc()
 
@@ -81,7 +83,7 @@ def recover_value(doc: Document) -> None:
         i_is_key = doc.entities[i].tag.endswith("Key")
         j_is_val = doc.entities[j].tag == doc.entities[i].tag.replace("Key", "Val")
         if i_is_key and j_is_val:
-            doc.add_relation("value", doc.entities[i].id, doc.entities[j].id)
+            doc.add_relation(LITERAL_VAL, doc.entities[i].id, doc.entities[j].id)
     # doc.update_doc()
 
 
