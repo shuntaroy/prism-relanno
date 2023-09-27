@@ -29,7 +29,12 @@ PTN_DATE = re.compile(r"\d\d\d\d-\d\d-\d\d")
 PTN_MONTH = re.compile(r"\d\d\d\d-\d\d")
 PTN_YEAR = re.compile(r"\d\d\d\d")
 
-TREL_NOT_ON = {"before", "after", "start", "finish"}
+LIT_on = "timeOn"
+LIT_before = "timeBefore"
+LIT_after = "timeAfter"
+LIT_begin = "timeStart"
+LIT_end = "timeEnd"
+TREL_NOT_ON = {LIT_on, LIT_before, LIT_after, LIT_begin, LIT_end}
 
 
 def generate_dot(doc: Document) -> str:
@@ -189,12 +194,12 @@ class TimeContainer:
         # self -after-> other | self -start-> other
         for t_ent in self.t_ents:
             for type_, ents in t_ent.rels_to.items():
-                if ents & other.t_ents and type_ in ["after", "start"]:
+                if ents & other.t_ents and type_ in [LIT_after, LIT_begin]:
                     return True
         # self <-before- other | self <-finish- other
         for t_ent in other.t_ents:
             for type_, ents in t_ent.rels_to.items():
-                if ents & self.t_ents and type_ in ["before", "finish"]:
+                if ents & self.t_ents and type_ in [LIT_before, LIT_end]:
                     return True
         return False
 
@@ -203,12 +208,12 @@ class TimeContainer:
         # self -before-> other | self -finish-> other
         for t_ent in self.t_ents:
             for type_, ents in t_ent.rels_to.items():
-                if ents & other.t_ents and type_ in ["before", "finish"]:
+                if ents & other.t_ents and type_ in [LIT_before, LIT_end]:
                     return True
         # self <-after- other | self <-start- other
         for t_ent in other.t_ents:
             for type_, ents in t_ent.rels_to.items():
-                if ents & self.t_ents and type_ in ["after", "start"]:
+                if ents & self.t_ents and type_ in [LIT_after, LIT_begin]:
                     return True
         return False
 
@@ -231,16 +236,16 @@ class TimeContainer:
         for t_ent in self.t_ents:
             for type_, ents in t_ent.rels_to.items():
                 if ents & other.t_ents:
-                    if type_ in ["before", "finish"]:
+                    if type_ in [LIT_before, LIT_end]:
                         return True
-                    if type_ in ["after", "start"]:
+                    if type_ in [LIT_after, LIT_begin]:
                         return False
         for t_ent in other.t_ents:
             for type_, ents in t_ent.rels_to.items():
                 if ents & self.t_ents:
-                    if type_ in ["before", "finish"]:
+                    if type_ in [LIT_before, LIT_end]:
                         return False
-                    if type_ in ["after", "start"]:
+                    if type_ in [LIT_after, LIT_begin]:
                         return True
         # raise ValueError("Both TimeContainers in comparison must have head TIMEX3.")
         # FIXME: ad-hock operation for List[TC] sorting
@@ -354,8 +359,8 @@ def make_tc_helper(
     """
     if ent not in tc.all_ents():
         tc.add(ent)
-        froms = ent.rels_from.get("on", set()) if from_ else set()
-        tos = ent.rels_to.get("on", set()) if to_ else set()
+        froms = ent.rels_from.get(LIT_on, set()) if from_ else set()
+        tos = ent.rels_to.get(LIT_on, set()) if to_ else set()
         rel_ents = froms | tos
         while rel_ents:
             rel_ent = rel_ents.pop()
@@ -406,7 +411,7 @@ def split_tc(tc: TimeContainer) -> List[TimeContainer]:
                     dur_date_val = parse_duration_value(
                         dur.attrs["value"],
                         date=the_date,
-                        neg=type_ == "finish",
+                        neg=type_ == LIT_end,
                     )
                     dur_date = Entity(
                         Id(dur.id + 10000), "TIMEX3", (-2, -1), dur_date_val
@@ -787,32 +792,32 @@ def infer_timespan(e, tcs, on_a_tc=None):
     if not (set(e.rels_to.keys()) & set(Relation.time_rels)):
         return []
 
-    if "start" in e.rels_to and "finish" in e.rels_to:
-        start_id = find_head_id(list(e.rels_to["start"])[0].id, tcs)
-        end_id = find_head_id(list(e.rels_to["finish"])[0].id, tcs)
+    if LIT_begin in e.rels_to and LIT_end in e.rels_to:
+        start_id = find_head_id(list(e.rels_to[LIT_begin])[0].id, tcs)
+        end_id = find_head_id(list(e.rels_to[LIT_end])[0].id, tcs)
         if is_earlier(start_id, end_id, tcs):
             return [start_id, end_id]
 
-    elif "start" in e.rels_to and "before" in e.rels_to:
-        start_id = find_head_id(list(e.rels_to["start"])[0].id, tcs)
-        before_id = find_head_id(list(e.rels_to["before"])[0].id, tcs)
+    elif LIT_begin in e.rels_to and LIT_before in e.rels_to:
+        start_id = find_head_id(list(e.rels_to[LIT_begin])[0].id, tcs)
+        before_id = find_head_id(list(e.rels_to[LIT_before])[0].id, tcs)
         if is_earlier(start_id, before_id, tcs):
             return [start_id, before_id]
         if on_a_tc:
             # before < start; CORRUPTED
             if is_earlier(start_id, on_a_tc.head.id, tcs):
-                # assume "start" is reliable
+                # assume LIT_begin is reliable
                 return [start_id, on_a_tc.head.id]
             if is_earlier(on_a_tc.head.id, before_id, tcs):
-                # assume "before" is reliable
+                # assume LIT_before is reliable
                 return [on_a_tc.head.id, before_id]
         # else:
-        # assume "start" is reliable
+        # assume LIT_begin is reliable
         return [start_id, tcs[-1].head.id]
 
-    elif "finish" in e.rels_to and "after" in e.rels_to:
-        after_id = find_head_id(list(e.rels_to["after"])[0].id, tcs)
-        end_id = find_head_id(list(e.rels_to["finish"])[0].id, tcs)
+    elif LIT_end in e.rels_to and LIT_after in e.rels_to:
+        after_id = find_head_id(list(e.rels_to[LIT_after])[0].id, tcs)
+        end_id = find_head_id(list(e.rels_to[LIT_end])[0].id, tcs)
         if is_earlier(after_id, end_id, tcs):
             return [after_id, end_id]
         elif on_a_tc:
@@ -823,39 +828,39 @@ def infer_timespan(e, tcs, on_a_tc=None):
         else:
             return [after_id, tcs[-1].head.id]
 
-    elif "start" in e.rels_to:
-        start_id = find_head_id(list(e.rels_to["start"])[0].id, tcs)
+    elif LIT_begin in e.rels_to:
+        start_id = find_head_id(list(e.rels_to[LIT_begin])[0].id, tcs)
         if on_a_tc and is_earlier(start_id, on_a_tc.head.id, tcs):
             return [start_id, on_a_tc.head.id]
         else:
             return [start_id, tcs[-1].head.id]
 
-    elif "finish" in e.rels_to:
-        end_id = find_head_id(list(e.rels_to["finish"])[0].id, tcs)
+    elif LIT_end in e.rels_to:
+        end_id = find_head_id(list(e.rels_to[LIT_end])[0].id, tcs)
         if on_a_tc and is_earlier(on_a_tc.head.id, end_id, tcs):
             return [on_a_tc.head.id, end_id]
         else:
             return [tcs[0].head.id, end_id]
 
-    elif "after" in e.rels_to:
-        after_id = find_head_id(list(e.rels_to["after"])[0].id, tcs)
+    elif LIT_after in e.rels_to:
+        after_id = find_head_id(list(e.rels_to[LIT_after])[0].id, tcs)
         if on_a_tc and is_earlier(after_id, on_a_tc.head.id, tcs):
             return [after_id, on_a_tc.head.id]
         else:
             return [after_id, tcs[-1].head.id]
 
-    elif "before" in e.rels_to:
-        before_id = find_head_id(list(e.rels_to["before"])[0].id, tcs)
+    elif LIT_before in e.rels_to:
+        before_id = find_head_id(list(e.rels_to[LIT_before])[0].id, tcs)
         if on_a_tc and is_earlier(on_a_tc.head.id, before_id, tcs):
             return [on_a_tc.head.id, before_id]
         else:
             return [tcs[0].head.id, before_id]
 
-    elif "on" in e.rels_to:
+    elif LIT_on in e.rels_to:
         if on_a_tc:
             on_id = on_a_tc.head.id
         else:
-            on_id = find_head_id(list(e.rels_to["on"])[0].id, tcs)
+            on_id = find_head_id(list(e.rels_to[LIT_on])[0].id, tcs)
         return [on_id, on_id]
 
 
